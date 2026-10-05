@@ -34,6 +34,7 @@ import { classifyTaskDay, dayPlacedIds } from '../shared/dailyPlanPolicy.js'
 import { isOpenTask } from '../shared/taskProgress.js'
 import type { WorkbenchSettings } from '../shared/contracts.js'
 import { readPersonaSettings, writePersonaSettings } from '../db/repo/personas.js'
+import { readExpertSettings, writeExpertSettings } from '../db/repo/experts.js'
 
 /**
  * 插件版本：直接读包内 package.json，避免再出现"代码已升级、health 还报旧版本"的漂移。
@@ -155,6 +156,13 @@ export function readWorkbenchSettings(db: DatabaseSync): WorkbenchSettings {
     dailyCapacityIncludeOverdue: (readMeta(db, 'daily_capacity_include_overdue') ?? '0') === '1',
     /** 角色库三个偏好：**唯一读入口**在 `db/repo/personas.ts`（与写入端共用一处形状）。 */
     ...readPersonaSettings(db),
+    /**
+     * 专家自动召唤（缺省**关**）：**唯一实现**在 `db/repo/experts.ts`。
+     *
+     * 这里刻意不写 `readMeta(db, 'expert_auto_summon') === '1'`：meta 键名与真值口径
+     * 只允许有一处（仓储），否则"设置页显示开、实际按关跑"迟早会发生。
+     */
+    ...readExpertSettings(db),
   }
 }
 
@@ -261,6 +269,12 @@ export function makeRoutes(db: DatabaseSync, deps: WorkbenchRouteDeps = {}): Web
             personaFavorites: body.personaFavorites,
             personaDisabledIds: body.personaDisabledIds,
           })
+          /**
+           * 专家自动召唤开关：**只接受真正的 boolean**（`'false'` 字符串不算，
+           * 否则 `Boolean('false') === true` 会让界面"显示关、实际按开跑"）。
+           * 写入实现只有一处（`db/repo/experts.ts` 的 `writeExpertSettings`）。
+           */
+          writeExpertSettings(db, { autoSummonExperts: body.autoSummonExperts })
           if (Array.isArray(body.quickWorkspaceRecent)) {
             /**
              * ⚠️ 语义是**整表替换**（2026-09-16 从"合并"改过来）：

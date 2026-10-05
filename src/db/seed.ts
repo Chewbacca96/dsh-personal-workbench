@@ -59,6 +59,7 @@ export const DICTIONARY_SEEDS: DictionarySeed[] = [
   { kind: 'draft_kind', code: 'knowledge', name: '知识条目', sortOrder: 70, config: {} },
   { kind: 'draft_kind', code: 'idea_cluster', name: '点子王提案', sortOrder: 80, config: {} },
   { kind: 'draft_kind', code: 'idea_tasks', name: '点子落地任务', sortOrder: 90, config: {} },
+  { kind: 'draft_kind', code: 'expert', name: '专家安装草稿', sortOrder: 100, config: {} },
 
   // 知识库分类
   // ⚠️ 颜色是**字典数据**（用户可在「设置 → 字典管理」里改），不是 UI 里的硬编码调色板。
@@ -88,6 +89,7 @@ export const DICTIONARY_SEEDS: DictionarySeed[] = [
   { kind: 'ai_session_scope', code: 'week_report', name: '周报会话', sortOrder: 30, config: {} },
   { kind: 'ai_session_scope', code: 'idea_association', name: '点子关联会话', sortOrder: 40, config: {} },
   { kind: 'ai_session_scope', code: 'idea_brainstorm', name: '点子头脑风暴会话', sortOrder: 50, config: {} },
+  { kind: 'ai_session_scope', code: 'expert_generation', name: '专家生成会话', sortOrder: 60, config: {} },
   { kind: 'draft_status', code: 'pending', name: '待确认', sortOrder: 10, config: {} },
   { kind: 'draft_status', code: 'confirmed', name: '已确认', sortOrder: 20, config: {} },
   { kind: 'draft_status', code: 'abandoned', name: '已放弃', sortOrder: 30, config: {} },

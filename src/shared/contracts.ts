@@ -111,7 +111,7 @@ export interface TaskSessionView {
 // 草稿
 // ---------------------------------------------------------------------------
 
-export type DraftKind = 'task' | 'subtask_plan' | 'daily_plan' | 'report' | 'knowledge' | 'idea_cluster' | 'idea_tasks' | 'completion'
+export type DraftKind = 'task' | 'subtask_plan' | 'daily_plan' | 'report' | 'knowledge' | 'idea_cluster' | 'idea_tasks' | 'completion' | 'expert'
 
 export interface DraftView {
   id: string
@@ -303,6 +303,14 @@ export interface WorkbenchSettings {
   personaFavorites: string[]
   /** 被禁用的角色 ID；缺省 `[]`（内置/用户/外部的合法角色**默认启用**）。 */
   personaDisabledIds: string[]
+  /**
+   * 是否允许 AI **自主**召唤专家（缺省 `false`，meta 键 `expert_auto_summon`）。
+   *
+   * 为什么默认关：自动召唤会在用户没点过任何按钮的情况下启动一个**会读文件、
+   * 会跑子代理**的后台任务，还可能把外部来源的内容装进技能目录。这种"花钱又动盘"
+   * 的动作必须由用户先明确授权；关着的时候手动召唤不受影响。
+   */
+  autoSummonExperts: boolean
 }
 
 // ---------------------------------------------------------------------------

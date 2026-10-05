@@ -115,7 +115,8 @@ console.log(JSON.stringify(counts));
 | 阶段 | 状态 | 证据/实际结果 |
 |---|---|---|
 | P0 目标执行环境重新核对 | ✅ 2026-10-05 已执行 | 见 §7；HEAD 50d85b9、SDK 0.2.0-rc.2、依赖的公开接口全部存在。原状态“未执行（本轮只核对了本机设计环境）”保留于此 |
-| P1–P5 生成与安装主链 | 未实现 | 无产品运行结果 |
+| P1 类型/设置/字典种子/路径与来源校验 | ✅ 2026-10-05 已执行 | 见 §8；typecheck 0 / build 0 / expert 三件套 43 pass / 回归 80 pass，AX-E01–E06 全 pass。原状态“未实现”保留于此 |
+| P2–P5 生成与安装主链 | 未实现 | 无产品运行结果 |
 | P6–P7 专家调用主链 | 未实现 | 无产品运行结果 |
 | P8 客户端界面 | 未实现 | 无浏览器结果 |
 | P9 包/真实 SDK/真实 LLM | 未执行 | 不以 fake provider 代替 |
@@ -181,4 +182,50 @@ dry-run 通过、目标不等于当前实例且任务已有测试实例授权后
 
 - 本批**没有**运行任何真实宿主服务调用（未注册 provider、未起子代理、未建生成会话）；仅为**源码/类型契约核对**，不是运行验证。
 - `connectWorkspace` 的 `reuseOrCreateBlank` 行为沿用设计取证结论（`dsh-client-ui-workspace/lib/client.js`），本批未复跑。
-- AX-E01–E62 仍全部**未做产品验收**。
+- AX-E01–E62 仍全部**未做产品验收**（生产库、真实宿主、真实 LLM 均未跑）。
+
+## 8. P1 施工记录（2026-10-05 执行）
+
+**批次**：P1 类型、设置、字典种子与纯路径/来源校验。完整交接（导出签名、路径负例清单、未接线事实、逐条断言覆盖）见 [P1-handover.md](P1-handover.md)。
+
+### 8.1 命令与退出码（主会话独立复跑，2026-10-05 12:0x–12:2x）
+
+| 命令 | 退出码 | 实际结果 |
+|---|---|---|
+| `pnpm typecheck` | 0 | 干净（Node v24.19.0 / pnpm 11.7.0） |
+| `pnpm build` | 0 | `buildId wb-a6d365e4dc01c490`，188 个输入文件 |
+| `node --test --test-concurrency=1 test/expertContracts.test.mjs test/expertPaths.test.mjs test/expertProvenance.test.mjs` | 0 | `tests 43 / pass 43 / fail 0` |
+| `node --test --test-concurrency=1 test/personaParse.test.mjs test/personaLibrary.test.mjs test/capabilities.test.mjs` | 0 | `tests 80 / pass 80 / fail 0` |
+| `node --test --test-concurrency=1 test/db.test.mjs` | 1 | `tests 9 / pass 8 / fail 1`：仅 `finally` 的 `removeTempDir` EPERM（`test/db.test.mjs:35`），**仓库既有 Windows 清理期问题**（v1.16.0.md:134、docs/issues/2026-10-05-clear-plan-does-not-refresh.md:60），非本批回归 |
+| `node docs/tasks/ed644638-…/evidence/p1-settings-http.mjs` | 0 | 真实 HTTP GET/POST 6/6（补 P1 无路由测试的缺口） |
+
+### 8.2 AX-E01–E06
+
+| 断言 | 结论 | 证据 |
+|---|---|---|
+| AX-E01（seed 两个 expert 种子 + 旧 schema 库补种 + 版本不变） | ✅ pass | `test/expertContracts.test.mjs` |
+| AX-E02（设置缺失/脏值/`'false'` 字符串 → 关；真 boolean 后 GET 一致） | ✅ pass | `test/expertContracts.test.mjs` + `evidence/p1-settings-http.mjs` |
+| AX-E03（同 session 去重 / 不同 request 冲突 / 不动其他域草稿） | ✅ pass | `test/expertContracts.test.mjs` |
+| AX-E04（同旧版本并发 CAS 只一个成功、不丢新内容） | ✅ pass | `test/expertContracts.test.mjs` |
+| AX-E05（路径负例全部拒 + 根外无写入） | ✅ pass | `test/expertPaths.test.mjs` |
+| AX-E06（根/父目录/目标文件是链接均拒 + 哨兵逐字不变） | ✅ pass | `test/expertPaths.test.mjs` |
+
+### 8.3 未验证项（如实标注）
+
+- 本批只有**单元/仓储层**证据：未起真实宿主、未注册 skill provider、未起子代理、未调真实 LLM（P4/P6/P9 范围）。
+- 设置页 **UI 开关未加**（§9.3，属 P5/P8）；本批只保证服务端读写与 GET/POST 接线。
+- 暂存/提交/校验/确认/放弃/安装器/恢复/catalog/手动 request/子代理调用**全部未实现**（P2+）；`~/.dsh/workbench/personas`、`skills` 仍为空，未写入任何文件。
+- 来源许可只做本地结构校验，不联网核验仓库/commit（设计如此）。
+
+### 8.4 规格偏差与复核修复
+
+- 偏差 1：`src/api/routes.ts` 超出 P1 清单接了设置 GET/POST（P5 复核并补 `service.setAutoEnabled`）。
+- 偏差 2：读开关接受 `'1'` 为真值标记（写入只写 `'true'`/`'false'`），AX-E02 的「脏值」不含 `'1'`。
+- 偏差 3：根是链接时 fail-closed，需显式 `allowRootLinkUnder`（P2/P3 生产安装器必须传）。
+- 复核修复 4 处（主会话提出、子代理只改这 4 处并复跑全绿）：①`assertNoLinksInPaths` 不再在「根是链接且边界允许」时提前返回（并按规格补中间级链接测试，反向注入后该测试确实变红 `pass 15 / fail 1`）；②`validateStagedFileContent` 默认只判字节、字符上限改为显式 `maxChars`（否则「归档原件超 20000 字符只给 warning」不可达）；③锁记录补 `draftId`；④删除注释里「V8 RegExp 漏 `$` 校验」的错判（`/^a+$/.test('aa') === true` 是正确行为，实现零改动）。
+
+### 8.5 环境事实（外部会话干扰，不当作本批成果）
+
+- 仓库内**另一个会话**正在跑 `release-preflight.mjs` 与 `scripts/repro/probe-*-mutations.mjs`：会删 `lib/`、改源文件再还原 → `pnpm build` 与 `node --test` 必须写在同一条命令里。
+- 检出并还原了一处**探针遗留变异**：`probe-listview-mutations.mjs` 被中途终止后，`src/client/components/KnowledgeList.tsx` 的 `knowledgeFilterActive` 留在 `return false`（正是该探针第 12 个变异）；主会话用 `git checkout` 还原，该文件不属于本批改动。
+- 仓库本地 `core.autocrlf` 被外部改成 `false`，而 HEAD blob 全为 LF、工作树多为 CRLF → 直接把改动 `git add` 会产生整文件 CRLF churn；本批文件已统一成 LF 后再提交（`git diff --stat` 只显示真实改动 +51/−3）。

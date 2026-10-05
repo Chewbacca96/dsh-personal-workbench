@@ -246,3 +246,15 @@ export {
   confirmIdeaClusterDraft, confirmIdeaTaskDraft, getPendingDraftForSession,
 } from './repo/ideas.js'
 export type { IdeaInput, IdeaRow, IdeaClusterInput, IdeaClusterRow } from './repo/ideas.js'
+
+// 专家域已抽到 repo/experts.ts（P1：只做设置开关 + expert 草稿的筛选/CAS，
+// 装文件、解析人格、校验来源分别属于 experts/*、personas/parse.ts、experts/provenance.ts）
+export {
+  readExpertSettings, writeExpertSettings,
+  getExpertDraft, getPendingExpertDraftForSession, createExpertDraft, updateExpertDraftCas,
+  defaultExpertId, ExpertRepoError,
+} from './repo/experts.js'
+export type {
+  CreateExpertDraftInput, CreateExpertDraftResult, ExpertDraftPatch, UpdateExpertDraftCasResult,
+  ExpertDraftStatus,
+} from './repo/experts.js'

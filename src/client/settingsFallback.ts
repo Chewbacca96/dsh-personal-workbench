@@ -9,10 +9,17 @@
 import { DEFAULT_ESTIMATE_MINUTES } from './capacity.js'
 import type { WorkbenchSettings } from '../shared/contracts.js'
 
-/** 容量两项偏好的兜底值（与 `capacity.ts` 的常量同值：一处读书、一处落库，必须一致）。 */
+/** 容量两项偏好与专家开关的兜底值（与 `capacity.ts`、`expert.ts` 的常量同值：一处读书、一处落库，必须一致）。 */
 const SETTINGS_FALLBACK = {
   defaultEstimateMinutes: DEFAULT_ESTIMATE_MINUTES,
   dailyCapacityIncludeOverdue: false,
+  /**
+   * 专家自动召唤缺省 **关**（与 `readExpertSettings` 同值）。
+   *
+   * ⚠️ 必须是 `??`：服务端明确给了 `false` 时**不能**被兜底覆盖成别的值 ——
+   * 那正好是"用户关掉了自动召唤、界面却显示开着"的事故形态。
+   */
+  autoSummonExperts: false,
 } as const
 
 /**
@@ -32,5 +39,6 @@ export function withSettingsFallback(settings: WorkbenchSettings): WorkbenchSett
     ...settings,
     defaultEstimateMinutes: settings.defaultEstimateMinutes ?? SETTINGS_FALLBACK.defaultEstimateMinutes,
     dailyCapacityIncludeOverdue: settings.dailyCapacityIncludeOverdue ?? SETTINGS_FALLBACK.dailyCapacityIncludeOverdue,
+    autoSummonExperts: settings.autoSummonExperts ?? SETTINGS_FALLBACK.autoSummonExperts,
   }
 }
