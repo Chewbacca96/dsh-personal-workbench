@@ -45,6 +45,7 @@
     "src/experts/install.ts",
     "src/experts/service.ts",
     "src/experts/tools.ts",
+    "src/experts/invocation.ts",
     "src/api/routes/experts.ts",
     "src/db/repo/experts.ts",
     "src/db/repo/persona-bindings.ts",

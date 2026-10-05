@@ -94,10 +94,28 @@ import {
 } from './catalog.js'
 import {
   probeExpertSkills,
+  probeExpertSubagents,
+  probeExpertTools,
   projectWorkbenchSkillRegistry,
   readLiveAgentCwd,
   resolveLiveAgentScope,
+  selectSpawnProvider,
 } from './host-adapter.js'
+import {
+  createExpertInvocation,
+  ExpertInvocationError,
+  isSubagentChildAgent,
+  type CreateManualRequestInput,
+  type CreateManualRequestResult,
+  type ExpertInvocationResult,
+  type ExpertLoadResult,
+  type ExpertResourceResult,
+} from './invocation.js'
+import {
+  EXPERT_GENERATION_TOOL_NAMES,
+  RUN_EXPERT_REQUEST_TOOL_NAME,
+  SUMMON_EXPERT_TOOL_NAME,
+} from './tools.js'
 import { WORKBENCH_SKILL_PROVIDER_NAME } from './skill-provider.js'
 import type { WorkbenchSkillRegistry } from './skill-package.js'
 import { isInsideExpertRoot, resolveExpertRoots, type ExpertRootOptions, type ExpertRoots } from './paths.js'
@@ -122,9 +140,9 @@ export interface ExpertCapabilities {
   generation: ExpertCapabilityReport
   /** 真实探测到的 skills 服务。 */
   skills: ExpertCapabilityReport
-  /** P6 未实现子代理调用 → 恒 `available:false`（不读设置开关）。 */
+  /** 手工召唤：**如实探测**子代理运行时的可用性（P6，§8.5 第 3 步）。 */
   manualSummon: ExpertCapabilityReport
-  /** 同上，但要带设置真值 `enabled`。 */
+  /** 同上，但要带设置真值 `enabled`（`enabled` 与 `available` 是两件事）。 */
   autoSummon: ExpertAutoSummonReport
   providerName: string
 }
@@ -167,10 +185,15 @@ export interface ExpertMethodology {
   text: string
 }
 
-/** 工具侧的执行身份（`exec.agent` / `exec.signal`）。HTTP 侧**不得**构造。 */
+/** 工具侧的执行身份（`exec.agent` / `exec.signal` / `exec.callId`）。HTTP 侧**不得**构造。 */
 export interface LiveExpertExec {
   readonly agent?: unknown
   readonly signal?: AbortSignal
+  /**
+   * 工具调用的稳定 id：auto（`summon_expert`）用它做"同一次分派只 start 一次"的身份（§8.6）。
+   * HTTP / 路由路径没有它，只能走 manual。
+   */
+  readonly callId?: string
 }
 
 /** 工具参数（snake_case 已由 `experts/tools.ts` 转成域 camelCase，不含 sessionId）。 */
@@ -204,10 +227,10 @@ export interface ExpertStartingInput {
 }
 
 /**
- * §12.2 的固定表面（P5 该实现的部分）。
+ * §12.2 的固定表面。
  *
- * P6 的 `createManualRequest/runManual/runAuto/loadForChild/readForChild` 刻意**不在此声明**：
- * 声明了就得实现，而 P5 一旦"看起来可用"就会让 §10 的降级口径失真。
+ * P5 只实现生成通道（草稿 / 安装 / 目录 / 技能）；P6 补齐**调用主链**五个方法，
+ * 它们全部**委托**给 `invocation.ts`（本模块不复制那条状态机）。
  */
 export interface ExpertService {
   capabilities(): Promise<ExpertCapabilities>
@@ -230,7 +253,20 @@ export interface ExpertService {
   readStagedFile(id: string, area: ExpertFileArea, path: string): ExpertFileView
   catalog(query?: string): Promise<ExpertCatalogResponse>
   preflight(personaId: string, agent?: unknown): Promise<ExpertPreflightResult>
+
+  // ---- 调用主链（P6，§8.1；实现全在 `invocation.ts`） --------------------
+  /** 建立一次手工调用请求（TTL 30 分钟，进程内有效）。`sessionId` 由路由从真实会话取。 */
+  createManualRequest(input: CreateManualRequestInput): CreateManualRequestResult
+  runManual(requestId: string, task: string, exec: LiveExpertExec): Promise<ExpertInvocationResult>
+  runAuto(personaId: string, task: string, exec: LiveExpertExec): Promise<ExpertInvocationResult>
+  loadForChild(ticket: string, exec: LiveExpertExec): Promise<ExpertLoadResult>
+  readForChild(ticket: string, path: string, exec: LiveExpertExec): Promise<ExpertResourceResult>
+
   setAutoEnabled(enabled: boolean): void
+  /** 开关真值（唯一来源是库里的 meta 键；`summon_expert` 的动态注册读它）。 */
+  autoSummonEnabled(): boolean
+  /** 订阅开关变化（返回退订函数）：装配层据此注册 / 注销 `summon_expert` 与自主提示区块。 */
+  onAutoSummonChange(listener: (enabled: boolean) => void): () => void
   setSkillInvalidator(invalidate: (() => boolean) | undefined): void
   invalidateSkills(): void
   recover(): Promise<ExpertIssue[]>
@@ -467,6 +503,8 @@ export function createExpertService(deps: ExpertServiceDeps): ExpertService {
   const roots = resolveExpertRoots(deps.roots ?? {})
   let skillInvalidator: (() => boolean) | undefined
   let disposed = false
+  /** 开关变化监听者（`summon_expert` / 自主提示区块的动态注册靠它）。 */
+  const autoSummonListeners = new Set<(enabled: boolean) => void>()
 
   /**
    * drafts / install 两个上下文**每次调用现造**：`skills` 探测必须反映"此刻"的宿主状态
@@ -548,6 +586,21 @@ export function createExpertService(deps: ExpertServiceDeps): ExpertService {
   }
 
   function projectFailure(error: unknown): ExpertFailureProjection {
+    /**
+     * 调用主链的失败载体（P6）：与 `ExpertServiceError` 一样走同一条投影
+     * （稳定 code → 状态码、绝对路径不进消息），只是 code 可能是人格解析 / 资源域的词。
+     */
+    if (error instanceof ExpertInvocationError) {
+      const labels = pathLabels()
+      return {
+        status: expertErrorStatus(error.code),
+        body: {
+          error: projectExpertMessage(error.message, labels),
+          code: error.code,
+          field: projectExpertField(error.field, labels),
+        },
+      }
+    }
     if (error instanceof ExpertServiceError) {
       const labels = pathLabels()
       const body: ExpertFailureBody = {
@@ -590,6 +643,52 @@ export function createExpertService(deps: ExpertServiceDeps): ExpertService {
       body: { error: projectExpertMessage(message, pathLabels()), code: 'invalid-payload' },
     }
   }
+
+  /**
+   * §8.5 第 15 步的**服务侧守卫**（AX-E43）：专家子代理不得再写专家草稿 / 再发起调用。
+   *
+   * 为什么不能只靠 `toolFilter.deny`：deny 只约束**工具**入口，而且 `summon_expert` 这类
+   * 条件注册的名字在"未注册"时不会进 deny。守卫放在服务里，"子代理 → 草稿"这条边才真正闭环。
+   */
+  function assertNotExpertChild(exec: LiveExpertExec | undefined, action: string): void {
+    if (isSubagentChildAgent(exec?.agent)) {
+      throw new ExpertServiceError('expert-disabled', 'exec.agent', `专家子代理不能${action}（§8.5 第 15 步的服务侧守卫）`)
+    }
+  }
+
+  /**
+   * §7.3 的依赖预检（**唯一**一处实现）：接口方法 `preflight` 与调用主链的运行前预检
+   * 共用它 —— 调用主链绝不写第二份"人格在不在、技能够不够"的判断。
+   */
+  async function preflightPersona(personaId: string, agent?: unknown): Promise<ExpertPreflightResult> {
+    const service = probeExpertSkills(ctx)
+    const result = await preflightExpert({
+      db,
+      roots,
+      personaId,
+      ...(service === undefined ? {} : { skills: service }),
+      ...(agent === undefined ? {} : { agent }),
+    })
+    return { ...result, issues: projectExpertIssues(result.issues, pathLabels()) }
+  }
+
+  /**
+   * 调用主链（§8.1）。状态全在 `invocation.ts`，这里只做**装配**：
+   * 软探测（每次调用重新探）+ 路径投影 + 复用上面那一个依赖预检。
+   */
+  const invocation = createExpertInvocation({
+    db,
+    roots,
+    probeSubagents: () => probeExpertSubagents(ctx),
+    probeTools: () => probeExpertTools(ctx),
+    preflight: (personaId, agent) => preflightPersona(personaId, agent),
+    /** §8.5 第 14 步：5 个草稿生成工具 + 再发起调用；`load/read` 必须保持可用。 */
+    deniedToolNames: [...EXPERT_GENERATION_TOOL_NAMES, RUN_EXPERT_REQUEST_TOOL_NAME],
+    /** 只有**真的注册着**才进 deny（SDK 对不存在的名字是 loud 拒绝）。 */
+    conditionalDeniedToolNames: [SUMMON_EXPERT_TOOL_NAME],
+    sanitizeMessage: (text) => projectExpertMessage(text, pathLabels()),
+    ...(deps.now === undefined ? {} : { now: deps.now }),
+  })
 
   function getDraft(id: string): ExpertDraftView {
     const draftId = typeof id === 'string' ? id.trim() : ''
@@ -680,6 +779,16 @@ export function createExpertService(deps: ExpertServiceDeps): ExpertService {
       const methodologyOk = methodologyText() !== undefined
       const skillsOk = probeExpertSkills(ctx) !== undefined
       const enabled = readExpertSettings(db).autoSummonExperts
+      /**
+       * 子代理调用能力**如实探测**（§8.5 第 3 步 / AX-E49）：没有合格 `spawn` provider
+       * （缺 subagents 服务、只有 fork/远程、缺 persona/toolFilter/depthLimit）就
+       * `available:false` + `expert-subagent-unavailable`。宁可少一个入口，也不让界面放开
+       * 一个必然失败的按钮。
+       */
+      const selection = selectSpawnProvider(probeExpertSubagents(ctx))
+      const summon: ExpertCapabilityReport = selection.ok
+        ? { available: true, reason: null }
+        : { available: false, reason: selection.code }
       return {
         generation: methodologyOk
           ? { available: true, reason: null }
@@ -687,12 +796,8 @@ export function createExpertService(deps: ExpertServiceDeps): ExpertService {
         skills: skillsOk
           ? { available: true, reason: null }
           : { available: false, reason: 'skill-service-unavailable' },
-        /**
-         * P5 没有子代理调用（P6 才做）：**如实报不可用**。
-         * 报 `available:true` 会让界面放开一个必然失败的入口。
-         */
-        manualSummon: { available: false, reason: 'expert-subagent-unavailable' },
-        autoSummon: { available: false, reason: 'expert-subagent-unavailable', enabled },
+        manualSummon: summon,
+        autoSummon: { ...summon, enabled },
         providerName: WORKBENCH_SKILL_PROVIDER_NAME,
       }
     },
@@ -754,6 +859,7 @@ export function createExpertService(deps: ExpertServiceDeps): ExpertService {
     },
 
     async submitDraft(input: ExpertSubmitDraftInput, exec: LiveExpertExec): Promise<ExpertOperationResult> {
+      assertNotExpertChild(exec, '写专家草稿')
       const sessionId = execSessionId(exec)
       try {
         return submitExpertDraft(draftContext(), {
@@ -772,6 +878,7 @@ export function createExpertService(deps: ExpertServiceDeps): ExpertService {
     },
 
     async stageFile(input: ExpertStageDraftFileInput, exec: LiveExpertExec): Promise<ExpertOperationResult> {
+      assertNotExpertChild(exec, '暂存专家草稿文件')
       const sessionId = execSessionId(exec)
       /**
        * 全新机器上 `<home>/.dsh/workbench/personas`（或 `skills`）可能还不存在，
@@ -797,6 +904,7 @@ export function createExpertService(deps: ExpertServiceDeps): ExpertService {
     },
 
     async removeFile(input: ExpertRemoveStagedFileInput, exec: LiveExpertExec): Promise<ExpertOperationResult> {
+      assertNotExpertChild(exec, '删改专家草稿暂存文件')
       const sessionId = execSessionId(exec)
       try {
         return removeExpertStagedFile(draftContext(), {
@@ -814,6 +922,8 @@ export function createExpertService(deps: ExpertServiceDeps): ExpertService {
     },
 
     async validateDraft(id: string, expectedVersion: number, exec?: LiveExpertExec): Promise<ExpertDraftView> {
+      /** 校验会写入校验快照（也是写）：同样挡住专家子代理。 */
+      assertNotExpertChild(exec, '校验专家草稿')
       const skills = await skillRegistry()
       const result = validateExpertDraft(draftContext(skills), {
         draftId: id,
@@ -927,20 +1037,52 @@ export function createExpertService(deps: ExpertServiceDeps): ExpertService {
     },
 
     async preflight(personaId: string, agent?: unknown): Promise<ExpertPreflightResult> {
-      const service = probeExpertSkills(ctx)
-      const result = await preflightExpert({
-        db,
-        roots,
-        personaId,
-        ...(service === undefined ? {} : { skills: service }),
-        ...(agent === undefined ? {} : { agent }),
-      })
-      return { ...result, issues: projectExpertIssues(result.issues, pathLabels()) }
+      return preflightPersona(personaId, agent)
+    },
+
+    // ---- 调用主链（P6）：全部委托给 invocation，本模块不复制那条状态机 ------
+    createManualRequest(input: CreateManualRequestInput): CreateManualRequestResult {
+      return invocation.createManualRequest(input)
+    },
+
+    async runManual(requestId: string, task: string, exec: LiveExpertExec): Promise<ExpertInvocationResult> {
+      return invocation.runManual(requestId, task, exec)
+    },
+
+    async runAuto(personaId: string, task: string, exec: LiveExpertExec): Promise<ExpertInvocationResult> {
+      return invocation.runAuto(personaId, task, exec)
+    },
+
+    async loadForChild(ticket: string, exec: LiveExpertExec): Promise<ExpertLoadResult> {
+      return invocation.loadForChild(ticket, exec)
+    },
+
+    async readForChild(ticket: string, path: string, exec: LiveExpertExec): Promise<ExpertResourceResult> {
+      return invocation.readForChild(ticket, path, exec)
     },
 
     setAutoEnabled(enabled: boolean): void {
       /** 只接受真 boolean（仓储层也再挡一次）：脏值不写库，读数永远是唯一真值来源。 */
       writeExpertSettings(db, { autoSummonExperts: enabled })
+      /** 通知监听者（装配层据此注册 / 注销工具与提示区块）。监听者抛错不影响设置写入。 */
+      for (const listener of [...autoSummonListeners]) {
+        try {
+          listener(enabled)
+        } catch {
+          /** 监听者自己的问题不能回滚设置：库是唯一真值，下次读还会得到同一个值。 */
+        }
+      }
+    },
+
+    autoSummonEnabled(): boolean {
+      return readExpertSettings(db).autoSummonExperts
+    },
+
+    onAutoSummonChange(listener: (enabled: boolean) => void): () => void {
+      autoSummonListeners.add(listener)
+      return () => {
+        autoSummonListeners.delete(listener)
+      }
     },
 
     setSkillInvalidator(invalidate: (() => boolean) | undefined): void {
@@ -962,8 +1104,13 @@ export function createExpertService(deps: ExpertServiceDeps): ExpertService {
     async dispose(): Promise<void> {
       if (disposed) return
       disposed = true
-      /** 只释放**自己**拥有的东西：解挂刷新钩子；不关 db、不关别人的 service。 */
+      /**
+       * 只释放**自己**拥有的东西：解挂刷新钩子、取消自己拥有的调用运行（dispose 里 abort
+       * 子代理 signal 并等它们静止）；不关 db、不关别人的 service。
+       */
       skillInvalidator = undefined
+      autoSummonListeners.clear()
+      await invocation.dispose()
     },
 
     projectFailure,

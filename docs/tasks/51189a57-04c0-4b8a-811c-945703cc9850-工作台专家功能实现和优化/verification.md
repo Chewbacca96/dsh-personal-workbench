@@ -120,7 +120,8 @@ console.log(JSON.stringify(counts));
 | P3 安装/受管发布门/中断恢复 | ✅ 2026-10-05 已执行 | 见 §10；typecheck 0 / build 0 / 11 个测试文件 207 pass 0 fail，AX-E15–E23 全 pass；含 17 个故障点矩阵与 4 例跨进程真崩溃。原状态“未实现”保留于此 |
 | P4 skill provider / catalog / 运行前依赖预检 | ✅ 2026-10-05 已执行 | 见 §11；typecheck 0 / build 0 / P4 三件套 45 pass / 回归 207 pass，AX-E24–E30 与 AX-E49 的 scope 前置全 pass；另有真实安装器 → 真实 provider 的独立字节级证据。原状态“未实现”保留于此 |
 | P5 生成会话与调用接线 | ✅ 2026-10-05 已执行 | 见 §12；typecheck 0 / build 0 / P5 四件套 43 pass / 专家域回归 45 pass / 全仓 1195 tests 1194 pass 1 fail（唯一失败是既有 db.test.mjs 清理期 EPERM）、AX-E31–E35 与 AX-E50 全 pass；另有真实 HTTP 全链独立证据 38/38 与 `pnpm pack` 产物核验。原状态“未实现”保留于此 |
-| P6–P7 专家调用主链 | 未实现 | 无产品运行结果 |
+| P6 专家调用主链（请求 / 子代理按需人格 / 回传与释放） | ✅ 2026-10-05 已执行 | 见 §13；typecheck 0 / build 0 / P6 三件套 33 pass / 专家域回归 80 pass，AX-E36–E44、E48 全 pass，AX-E49 通过但其中"真实 skills 服务根因"标未验证；主会话另做并发位反向注入（AX-E44 变红）。原状态"未实现"保留于此 |
+| P7 手动入口（`@` / `/expert` / 命令 / 面板） | 未实现 | 无浏览器结果 |
 | P8 客户端界面 | 未实现 | 无浏览器结果 |
 | P9 包/真实 SDK/真实 LLM | 未执行 | 不以 fake provider 代替 |
 
@@ -450,3 +451,43 @@ dry-run 通过、目标不等于当前实例且任务已有测试实例授权后
 ### 12.6 未验证项（如实标注，不填通过）
 
 8+1−1 条见 `P5-handover.md` §8，其中与 §12.2 直接相关的是：**真实 19387 宿主实例未跑**（未重启、未装盘，需用户明确授权）、**真实宿主 skills 服务未跑**（全程 fake/桩）、**"最近层同名技能胜出"的合并语义未在真实注册表验证**（只证明了 scope/cwd 原样传入）。
+
+---
+
+## 13. P6 施工记录（2026-10-05 执行）
+
+### 13.1 命令与退出码（主会话独立复跑，同一条命令链）
+
+| 命令 | 退出码 | 计数 / 结果 |
+|---|---|---|
+| `pnpm typecheck` | 0 | — |
+| `pnpm build` | 0 | client `lib\client.js` 552.64 kB；buildId `wb-fc290c643d3d895a`（200 个输入文件） |
+| `node --test test/expertInvocation.test.mjs test/expertWiring.test.mjs test/personaBinding.test.mjs` | 0 | `tests 33 / pass 33 / fail 0`（16 + 8 + 9） |
+| `node --test test/expertProvider.test.mjs test/expertCatalog.test.mjs test/skills.test.mjs test/expertRoutes.test.mjs test/expertTools.test.mjs test/httpFence.test.mjs` | 0 | `tests 80 / pass 80 / fail 0` |
+
+全仓套件本批**未跑**；按 P5 基线（`1195 / 1194 pass / 1 fail`，唯一失败为既有 `test/db.test.mjs` 清理期 EPERM）+ 新增 16 条推算为 `1211 / 1210 / 1` —— 推算不等于实测。
+
+### 13.2 AX-E36–E44 / E48 / E49
+
+逐条证据（用例名）见 `P6-handover.md` §6。结论：**AX-E36–E44 与 AX-E48 全 ✅**；**AX-E49** 的 5 条用例通过（缺 subagents / 只有 fork / 缺 `persona|toolFilter|depthLimit` / 开关打开但无合格 provider / 完全无 subagents 服务），但其中"真实 skills 服务导致的 `skill-scope-unavailable`"**根因未验证**（拒绝路径真实，触发源是注入的假 preflight）。
+
+### 13.3 交付物
+
+新增 `src/experts/invocation.ts`（1284 行）、`test/expertInvocation.test.mjs`（1150 行，16 条）；修改 `src/experts/host-adapter.ts`（405 → 564）、`src/experts/service.ts`（994 → 1140）、`src/experts/tools.ts`（576 → 959）、`src/index.ts`（618 → 670）、`tsconfig.build.json`（+1 include）。全部 CR=0 且以 LF 结尾。顶层 `inject` 逐字未变；未加依赖；未改 `SCHEMA_VERSION`；`src/api/**` 与 `src/client/**` 未动（`POST /experts/manual-requests` 属 P7）。
+
+### 13.4 独立证据（主会话亲自执行）
+
+- **反向注入（主会话另挑一处）**：`acquireSlot` 的 `perSession >= 1 || total >= 2` 闸门改成 `>= 999` → `✖ AX-E44 … (60107.39ms)`、`tests 16 / pass 15 / fail 1`；还原后 SHA256 与注入前逐字节相同（`29BC8900ADA9445FC341AE14AA3FCB26ADE3EC3780EE4057FF271740AE0950B2`），CR=0。→ 并发上限由**会失败的断言**守住，不是源码扫描。
+- **子代理的反向注入**：拿掉 `requireTicket` 的 `parentSession` 校验 → `✖ AX-E39 …`（`'ticket-child-mismatch'` ≠ `'ticket-invalid'`）、`tests 1 / pass 0 / fail 1`；还原后 33/33。
+- **格式修复**：`src/experts/host-adapter.ts` 缺尾换行 + 新段前多一个空行 → 已补（564 行、CR=0）。
+- **无真实 provider 证据**：本机 spawn provider 是 cordis 插件（只导出 `Config/apply/inject/name`），要跑需真宿主 + 真 LLM，属 P9 隔离实例验收范围 → §13.6 如实标未验证。
+
+### 13.5 规格偏差、复核与修复
+
+12 条规格偏差逐条列在 `P6-handover.md` §7（其中"非 completed 的失败码映射"、"没 claim ≠ 契约错配"、"多一道能力可用门"、"两个常量落本模块"、"子代理守卫用 `expert-disabled`"明确标注为**判断/解释**）。
+
+主会话逐段读完 `invocation.ts` 全文与 4 个修改文件的 diff，**未发现功能缺陷，故本批没有修复轮**（只做了一处格式修复）。口径纠正一处：子代理报告 §6-1 称"error/max-tokens/refusal 统一映射成 `expert-subagent-unavailable`"，实际是 `error` → `expert-subagent-unavailable`、`aborted` → `canceled`、`max-tokens`/`refusal` → 直接使用宿主 stopReason 字面值作为 `code`（§12.1 无对应码），以 `P6-handover.md` §7-3 为准。另修正 `P5-handover.md:40` 的 `methodology()` 签名漂移（同步 `ExpertMethodology`，不是 `Promise`）。
+
+### 13.6 未验证项（如实标注，不填通过）
+
+8 条见 `P6-handover.md` §8，核心是：**真实宿主 provider / 真 `SubagentRuntime` / 真 LLM 全部未跑**（时序、dispose 幂等、stopReason 取值、child header 字段、`persona` 严格插值、`ToolRuntime` 对未知 deny 名的 loud 拒绝都只对着忠实假实现验证过）；**真实 skills 服务的 `skill-scope-unavailable` 根因未验证**；**真 cordis 热重载未验证**；**`subagents` 服务"晚到"不会重同步**（只在设置变化时 `sync()`）；**P7 UI 与真实 19387 实例未跑**；macOS/Linux 未测。

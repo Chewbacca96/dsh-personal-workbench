@@ -16,7 +16,7 @@
  *    生产代码里绝不能在顶层 import —— 拿不到就明确"scope 不可用"，而不是假装全局视角等于
  *    Agent 视角。
  */
-import type { ExpertErrorCode, ExpertIssue } from '../shared/expert.js'
+import { EXPERT_PROVIDER_CODE, type ExpertErrorCode, type ExpertIssue } from '../shared/expert.js'
 import type { WorkbenchSkillRegistry, WorkbenchSkillRegistryEntry } from './skill-package.js'
 import type { SkillResourceBaseLike, SkillViewOptionsLike, SkillsServiceLike } from './skill-provider.js'
 
@@ -401,4 +401,165 @@ export async function projectWorkbenchSkillRegistry(
     scope: options.scope,
     complete: list.complete,
   })
+}
+
+// ---------------------------------------------------------------------------
+// subagents 软探测与 provider 选择（P6 §8.5）
+// ---------------------------------------------------------------------------
+
+/**
+ * `ctx.subagents` 的**形状最小化**视图。
+ *
+ * 这里刻意用结构化类型而不是 `import type { SubagentRuntime } from '@deepseek-ai/dsh-subagent'`：
+ * 该包是**可选**宿主依赖（用户可能只装工作台），静态 import 会让插件在缺它的机器上起不来；
+ * 而 `import type` 也会把"本机装了长什么样"写进源码契约。软探测 + 形状校验才是诚实的做法。
+ */
+export interface SubagentStartRequestLike {
+  readonly label?: string
+  readonly prompt: readonly { type: 'text'; text: string }[]
+  readonly parent: unknown
+  readonly signal: AbortSignal
+  readonly persona?: string
+  readonly maxDepth?: number
+  readonly toolFilter?: { readonly allow?: readonly string[]; readonly deny?: readonly string[] }
+}
+
+export interface SubagentProviderCapabilitiesLike {
+  readonly agentOptions?: unknown
+  readonly outputSchema?: unknown
+  readonly depthLimit?: unknown
+  readonly toolFilter?: unknown
+  readonly persona?: unknown
+}
+
+export interface SubagentProviderLike {
+  readonly name?: unknown
+  readonly capabilities?: SubagentProviderCapabilitiesLike
+  readonly inheritsParentContext?: unknown
+}
+
+/**
+ * 软探测通过之后**我们敢依赖**的表面：三个函数都由 `probeExpertSubagents` 逐个做过形状校验。
+ *
+ * `start` 的返回值刻意是 `unknown`：`run` 的字段（`id` / `localAgent` / `result` / `dispose`）
+ * 由调用方 `readSubagentRun()` 逐字段校验后再用 —— provider 是第三方实现，形状不符要
+ * 走 `adapter-contract-mismatch`，不能靠类型断言假装它一定对。
+ */
+export interface SubagentServiceLike {
+  /** 注册表里的 provider 名。 */
+  list(): unknown
+  getProvider(name: string): unknown
+  start(name: string, request: SubagentStartRequestLike): Promise<unknown>
+}
+
+/** `ctx.tools` 里我们唯一需要的能力：按名字问"这个工具真的注册了吗"。 */
+export interface ToolRegistryLike {
+  get?: unknown
+}
+
+function isFunction(value: unknown): value is (...args: never[]) => unknown {
+  return typeof value === 'function'
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function probeOptionalService(ctx: unknown, name: string): unknown {
+  if (!isObject(ctx)) return undefined
+  const get = (ctx as { get?: unknown }).get
+  if (!isFunction(get)) return undefined
+  try {
+    return (get as (key: string) => unknown)(name)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 软探测 `ctx.subagents`：拿不到 / 形状不对一律 `undefined`（调用方据此说"不可用"）。
+ *
+ * 形状要求（§8.5 第 3 步）：`list`、`getProvider`、`start` 都是函数。少任何一个都算
+ * "不可用"，因为 P6 的调用链三个都要用（能力报告 / provider 选择 / 真正启动）。
+ */
+export function probeExpertSubagents(ctx: unknown): SubagentServiceLike | undefined {
+  const service = probeOptionalService(ctx, 'subagents')
+  if (typeof service !== 'object' || service === null) return undefined
+  const candidate = service as { start?: unknown; getProvider?: unknown; list?: unknown }
+  if (typeof candidate.start !== 'function' || typeof candidate.getProvider !== 'function' || typeof candidate.list !== 'function') {
+    return undefined
+  }
+  return service as SubagentServiceLike
+}
+
+/** 软探测 `ctx.tools`（只为校验 deny 名单里没有不存在的工具名）。 */
+export function probeExpertTools(ctx: unknown): ToolRegistryLike | undefined {
+  const service = probeOptionalService(ctx, 'tools')
+  if (typeof service !== 'object' || service === null) return undefined
+  if (typeof (service as { get?: unknown }).get !== 'function') return undefined
+  return service as ToolRegistryLike
+}
+
+/** provider 选择的失败面：原因必须足以让人知道"该装什么/该开什么"。 */
+export interface ExpertSubagentUnavailable {
+  readonly ok: false
+  readonly code: 'expert-subagent-unavailable'
+  readonly message: string
+}
+
+export type ExpertSubagentSelection =
+  | { readonly ok: true; readonly provider: SubagentProviderLike }
+  | ExpertSubagentUnavailable
+
+function unavailable(message: string): ExpertSubagentUnavailable {
+  return { ok: false, code: 'expert-subagent-unavailable', message }
+}
+
+/**
+ * 选 provider（§8.5 第 3 步）：**只有** `spawn` 且 `inheritsParentContext === false`、
+ * `persona`/`toolFilter`/`depthLimit` 三项能力全为 `true` 才算等价实现。
+ *
+ * 刻意不把 `fork` / acp / 远程 provider 当替代：
+ * - `inheritsParentContext === true` 的 provider 里，子代理根本不是"独立会话"，
+ *   「按需加载人格」的整个前提（child session 身份 + 独立上下文）不成立；
+ * - 缺 `persona` ⇒ 没法把加载短指令交给子代理；缺 `toolFilter` ⇒ 专家子代理的 deny
+ *   失效（等于把草稿写入能力给了子代理）；缺 `depthLimit` ⇒ 无法把委派深度钉死。
+ * 任何一条不满足都返回**明确不可用**，绝不降级猜测。
+ */
+export function selectSpawnProvider(service: SubagentServiceLike | undefined): ExpertSubagentSelection {
+  if (service === undefined) {
+    return unavailable('宿主没有提供 subagents 服务（@deepseek-ai/dsh-subagent 未安装或未注册）：本机不能启动专家子代理，本次不假装可用')
+  }
+  if (!isFunction(service.start)) return unavailable('subagents 服务没有 start 函数：不猜 API，本次判为不可用')
+  if (!isFunction(service.getProvider)) return unavailable('subagents 服务没有 getProvider：不猜 API，本次判为不可用')
+  let provider: unknown
+  try {
+    provider = (service.getProvider as (name: string) => unknown)(EXPERT_PROVIDER_CODE)
+  } catch (error) {
+    return unavailable(`subagents.getProvider('${EXPERT_PROVIDER_CODE}') 抛错：${(error as Error).message}`)
+  }
+  if (!isObject(provider)) {
+    return unavailable(`注册表里没有名为「${EXPERT_PROVIDER_CODE}」的子代理 provider：不把 fork / acp / 远程 provider 当作等价实现（§8.5 第 3 步）`)
+  }
+  const name = provider.name
+  if (typeof name === 'string' && name !== EXPERT_PROVIDER_CODE) {
+    return unavailable(`getProvider('${EXPERT_PROVIDER_CODE}') 返回了名为「${name}」的 provider：注册名对不上，本次判为不可用`)
+  }
+  if (provider.inheritsParentContext !== false) {
+    return unavailable(`provider「${EXPERT_PROVIDER_CODE}」的 inheritsParentContext 不是 false（会继承父上下文，拿不到独立子会话身份）：按 §8.5 第 3 步拒绝`)
+  }
+  const capabilities = provider.capabilities
+  if (!isObject(capabilities)) {
+    return unavailable(`provider「${EXPERT_PROVIDER_CODE}」没有 capabilities：无法确认 persona/toolFilter/depthLimit，本次判为不可用`)
+  }
+  if (capabilities.persona !== true) {
+    return unavailable(`provider「${EXPERT_PROVIDER_CODE}」不支持 persona 参数：无法把"按需加载人格"的短指令交给子代理，本次判为不可用`)
+  }
+  if (capabilities.toolFilter !== true) {
+    return unavailable(`provider「${EXPERT_PROVIDER_CODE}」不支持 toolFilter：专家子代理的工具 deny 无法生效，本次判为不可用`)
+  }
+  if (capabilities.depthLimit !== true) {
+    return unavailable(`provider「${EXPERT_PROVIDER_CODE}」不支持 depthLimit：无法钉死委派深度，本次判为不可用`)
+  }
+  return { ok: true, provider: provider as SubagentProviderLike }
 }

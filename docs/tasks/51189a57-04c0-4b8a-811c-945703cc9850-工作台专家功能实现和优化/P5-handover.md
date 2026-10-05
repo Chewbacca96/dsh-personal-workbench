@@ -37,7 +37,7 @@ export interface ExpertServiceDeps { db: WorkbenchDb; ctx: unknown; roots?: Pers
 export interface ExpertCapabilities { generation: ExpertCapability; skills: ExpertCapability; manualSummon: ExpertCapability; autoSummon: ExpertCapability & { enabled: boolean }; providerName: string }
 export interface ExpertService {
   capabilities(): Promise<ExpertCapabilities>
-  methodology(): Promise<{ version: number; text: string }>
+  methodology(): ExpertMethodology        // 同步（P6 复核时改正：P5 交接稿曾误写成 Promise）
   startGeneration(input): Promise<ExpertDraftView>
   getDraft(draftId): Promise<ExpertDraftView | undefined>
   currentPendingDraft(sessionId: string): Promise<ExpertDraftView | undefined>   // 附加（§12.2 无）

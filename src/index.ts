@@ -31,10 +31,11 @@ import { readWeixinInboundCount } from './reminder/weixin-status.js'
 import type { TeamMemoryService } from './review-memory.js'
 import { taskWorkspaceFolderName } from './client/taskFolder.js'
 import { loadPersonaTool, proposeDailyPlanTool, proposeIdeaClustersTool, proposeSubtasksTool, readPersonaResourceTool, requestCompletionTool, saveTaskMemoryTool, submitIdeaTasksTool, submitKnowledgeTool, submitReportTool, submitReviewTool, submitTaskTool, updateProgressTool, updateTaskTool, type PersonaDependencyPreflight } from './tools.js'
-import { probeExpertSkills } from './experts/host-adapter.js'
+import { AUTO_EXPERT_PROMPT_BLOCK_NAME, AUTO_EXPERT_PROMPT_ORDER, buildAutoExpertPrompt } from './experts/catalog.js'
+import { probeExpertSkills, probeExpertSubagents, selectSpawnProvider } from './experts/host-adapter.js'
 import { createExpertService, type ExpertService } from './experts/service.js'
 import { registerWorkbenchSkillProvider, type SkillRegistrarLike, type WorkbenchSkillRegistration } from './experts/skill-provider.js'
-import { expertGenerationTools } from './experts/tools.js'
+import { expertGenerationTools, expertInvocationTools, summonExpertTool } from './experts/tools.js'
 
 export const name = 'personal-workbench'
 
@@ -515,10 +516,62 @@ function applyReady(ctx: Context, db: DatabaseSync, config: Config): void {
          * 这里**不注册任何确认/安装工具**（AX-E34）—— 那是用户在界面上的动作。
          */
         ...expertGenerationTools(experts),
+        /**
+         * 专家**调用主链**的 3 个工具（§8.2）：始终注册。
+         * `workbench_run_expert_request` 给父会话按请求发起调用；
+         * `workbench_load_invoked_expert` / `workbench_read_invoked_expert_resource`
+         * 是**专家子代理自己**用的入口 —— 它们必须可用，否则子代理永远加载不了人格。
+         */
+        ...expertInvocationTools(experts),
       ].map((tool) => ctx.tools.register(tool))
       return () => { for (const dispose of disposers) dispose() }
     },
     'dsh-personal-workbench: tools',
+  )
+
+  /**
+   * 自主专家（§8.2 + AX-E48）：`summon_expert` 工具与 `plugin:workbench-experts`
+   * 提示区块**按开关动态注册 / 注销**，两者同一个 effect、各自一个 disposer。
+   *
+   * 三条为什么这样写：
+   * 1. **开关真值只在库里**（`expert_auto_summon` 这一个 meta 键）：这里既不缓存也不猜，
+   *    每次同步都重新 `autoSummonEnabled()`；HTTP 改设置 → `setAutoEnabled` → 通知 → 重同步。
+   * 2. **能力也要真**：`selectSpawnProvider` 不通过（没有 `spawn`、只有 fork/远程、缺
+   *    persona/toolFilter/depthLimit）时**不注册** —— 宁可少一个入口，也不给模型一个必然失败的工具。
+   * 3. dispose 只摘自己注册的东西：先退订监听，再跑本轮的 disposer；**不碰 db**
+   *    （`text` 回调只在提示构建时读库，不在释放期读）。
+   */
+  ctx.effect(
+    () => {
+      let disposers: Array<() => void> = []
+      const release = () => {
+        for (const dispose of disposers) dispose()
+        disposers = []
+      }
+      const sync = () => {
+        release()
+        if (!experts.autoSummonEnabled()) return
+        if (!selectSpawnProvider(probeExpertSubagents(ctx)).ok) return
+        disposers.push(ctx.tools.register(summonExpertTool(experts)))
+        disposers.push(ctx.systemPrompt.section({
+          name: AUTO_EXPERT_PROMPT_BLOCK_NAME,
+          order: AUTO_EXPERT_PROMPT_ORDER,
+          /** 自主专家清单由本插件自己渲染，**不要**让宿主再插值（`{{...}}` 会误伤正文）。 */
+          interpolate: false,
+          text: () => buildAutoExpertPrompt({
+            db,
+            roots: { personasDir: experts.roots.personasDir, skillsDir: experts.roots.skillsDir, ...rootOptions, platform: process.platform },
+          }).text,
+        }))
+      }
+      const unsubscribe = experts.onAutoSummonChange(() => sync())
+      sync()
+      return () => {
+        unsubscribe()
+        release()
+      }
+    },
+    'dsh-personal-workbench: experts-auto',
   )
 
   /**
