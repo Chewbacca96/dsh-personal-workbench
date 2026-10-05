@@ -352,3 +352,154 @@ export function updateExpertDraftCas(
   if (updated === undefined) throw new ExpertRepoError('draft-not-found', `更新后的专家草稿读不回来：${id}`)
   return { draft: updated, payload: next, changed: true }
 }
+
+// ---------------------------------------------------------------------------
+// 草稿：安装器专用的短事务状态迁移（§6.4 第 4 / 9 步）
+// ---------------------------------------------------------------------------
+
+/**
+ * 一次安装状态迁移要改的字段。
+ *
+ * 与 `ExpertDraftPatch` 的**关键区别**：这里允许在 `phase === 'installing'` 时写入
+ * （安装器必须在"正在装"的状态下推进阶段），而 `updateExpertDraftCas` 会明确拒绝 ——
+ * 所以安装器**只能**走这个入口，模型侧的工具走不了。
+ */
+export interface ExpertInstallTransition {
+  /** 目标阶段（`installing` / `install-failed`）。不传 = 不改。 */
+  phase?: ExpertDraftPayload['phase']
+  /** 最近一次安装失败的字段级原因。显式 `null` = 清空。 */
+  lastInstallError?: ExpertIssue | null
+  /** 安装结果（§6.4 第 9 步与 `confirmed` 同一事务回写）。 */
+  confirmResult?: ExpertInstallResult
+}
+
+export interface TransitionExpertDraftInstallResult {
+  draft: DraftRow
+  payload: ExpertDraftPayload
+  /** 本次是否真的把外层状态改成了 `confirmed`。 */
+  confirmed: boolean
+}
+
+/**
+ * 安装器的**唯一** DB 迁移入口（`BEGIN IMMEDIATE` + 同版本 CAS）。
+ *
+ * 三条不可让步的语义：
+ *
+ * 1. **CAS 只在同一事务里成立**：`UPDATE … WHERE status_code='pending' AND
+ *    json_extract(payload_json,'$.contentVersion') = ?`，0 行即 `draft-version-conflict`。
+ *    第 9 步"回写 confirmResult 并把外层改成 confirmed"因此在数据层是原子的 ——
+ *    两个并发确认只可能有一个把 `pending` 改成 `confirmed`，另一个拿到冲突错误。
+ * 2. **`BEGIN IMMEDIATE`** 而不是 `BEGIN`：立刻拿写锁，避免"读完了才升级写锁"时
+ *    发现别人已经改过（那样 CAS 必然失败，但会白白多写一轮文件）。
+ * 3. **`contentVersion` 不变**：阶段与 `confirmResult` 都不是内容键（§3.4），
+ *    在"装到一半"和"装完之后"之间反复迁移不会让用户手里的版本号漂移。
+ *
+ * 调用方**不得**在这个事务里做任何文件系统或网络操作（§6.4 末条：`ROLLBACK` 不会撤销文件）。
+ *
+ * @throws ExpertRepoError `draft-not-found` / `draft-not-pending` / `draft-version-conflict`
+ */
+export function transitionExpertDraftInstall(
+  db: DatabaseSync,
+  id: string,
+  expectedVersion: number,
+  transition: ExpertInstallTransition,
+  at: string = nowIso(),
+): TransitionExpertDraftInstallResult {
+  const draft = getExpertDraft(db, id)
+  if (draft === undefined) throw new ExpertRepoError('draft-not-found', `专家草稿不存在：${id}`)
+  if (draft.statusCode !== 'pending') {
+    throw new ExpertRepoError(
+      'draft-not-pending',
+      `专家草稿当前状态是 ${draft.statusCode}，安装器不能再用它做状态迁移（已确认的草稿走幂等回放）`,
+    )
+  }
+  const before = draft.payload as unknown as ExpertDraftPayload
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 0 || expectedVersion !== before.contentVersion) {
+    throw new ExpertRepoError(
+      'draft-version-conflict',
+      `安装期版本冲突：期望 v${expectedVersion}，库里是 v${before.contentVersion}（草稿在安装期间被改过）`,
+    )
+  }
+
+  const next: ExpertDraftPayload = { ...before }
+  if (transition.phase !== undefined) next.phase = transition.phase
+  if (transition.lastInstallError !== undefined) next.lastInstallError = transition.lastInstallError
+  if (transition.confirmResult !== undefined) next.confirmResult = transition.confirmResult
+
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const result = db.prepare(
+      `UPDATE task_drafts SET payload_json = ?, status_code = 'pending', updated_at = ?
+        WHERE id = ? AND kind_code = ? AND status_code = 'pending'
+          AND json_extract(payload_json, '$.contentVersion') = ?`,
+    ).run(JSON.stringify(next), at, id, EXPERT_DRAFT_KIND, expectedVersion)
+    if (Number(result.changes) === 0) {
+      throw new ExpertRepoError(
+        'draft-version-conflict',
+        `安装期版本冲突：v${expectedVersion} 已被另一轮写入（本次迁移未落库，文件补偿由安装器负责）`,
+      )
+    }
+    db.exec('COMMIT')
+  } catch (error) {
+    try { db.exec('ROLLBACK') } catch { /* 事务可能已提交或已回滚，不能掩盖原始错误 */ }
+    throw error
+  }
+
+  const updated = getDraft(db, id)
+  if (updated === undefined) throw new ExpertRepoError('draft-not-found', `迁移后的专家草稿读不回来：${id}`)
+  return { draft: updated, payload: next, confirmed: false }
+}
+
+/**
+ * §6.4 第 9 步的短事务：**同一个** `BEGIN IMMEDIATE` 里
+ * 回写 `confirmResult` 并把外层状态从 `pending` 改成 `confirmed`。
+ *
+ * 独立成一个函数（而不是给 `transitionExpertDraftInstall` 加个 `confirm` 布尔）是为了让
+ * "不可回滚的那一步"在调用点只有**一个**可能的名字 —— 安装器在写正式文件之后只调它。
+ *
+ * @throws ExpertRepoError 同 `transitionExpertDraftInstall`
+ */
+export function commitExpertDraftInstallation(
+  db: DatabaseSync,
+  id: string,
+  expectedVersion: number,
+  result: ExpertInstallResult,
+  at: string = nowIso(),
+): DraftRow {
+  const draft = getExpertDraft(db, id)
+  if (draft === undefined) throw new ExpertRepoError('draft-not-found', `专家草稿不存在：${id}`)
+  if (draft.statusCode !== 'pending') {
+    throw new ExpertRepoError('draft-not-pending', `专家草稿当前状态是 ${draft.statusCode}，不能再确认`)
+  }
+  const before = draft.payload as unknown as ExpertDraftPayload
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 0 || expectedVersion !== before.contentVersion) {
+    throw new ExpertRepoError(
+      'draft-version-conflict',
+      `确认期版本冲突：期望 v${expectedVersion}，库里是 v${before.contentVersion}（草稿在安装期间被改过）`,
+    )
+  }
+  const next: ExpertDraftPayload = { ...before, confirmResult: result }
+
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const updated = db.prepare(
+      `UPDATE task_drafts SET payload_json = ?, status_code = 'confirmed', updated_at = ?
+        WHERE id = ? AND kind_code = ? AND status_code = 'pending'
+          AND json_extract(payload_json, '$.contentVersion') = ?`,
+    ).run(JSON.stringify(next), at, id, EXPERT_DRAFT_KIND, expectedVersion)
+    if (Number(updated.changes) === 0) {
+      throw new ExpertRepoError(
+        'draft-version-conflict',
+        `确认期版本冲突：v${expectedVersion} 已不是 pending（本次确认未落库）`,
+      )
+    }
+    db.exec('COMMIT')
+  } catch (error) {
+    try { db.exec('ROLLBACK') } catch { /* 事务可能已提交或已回滚，不能掩盖原始错误 */ }
+    throw error
+  }
+
+  const row = getDraft(db, id)
+  if (row === undefined) throw new ExpertRepoError('draft-not-found', `确认后的专家草稿读不回来：${id}`)
+  return row
+}

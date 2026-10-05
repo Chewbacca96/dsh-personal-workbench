@@ -132,6 +132,14 @@ export type PersonaDiagnosticCode =
   | 'resource-binary'
   | 'resource-limit'
   | 'resource-skipped-symlink'
+  // ---- 受管发布门（§6.2）
+  /**
+   * 受管（安装器生成）人格的 `generated/<UUID>/publication.json` 缺失/损坏/未 ready。
+   *
+   * 这一类只可能出现在**用户根下 ID 精确匹配 `generated/<UUID>`** 的文档上；普通手工、
+   * 内置、外部角色永远不会拿到它。收到它就表示"安装没走完"，而不是"这份角色写得不对"。
+   */
+  | 'installation-incomplete'
 
 export interface PersonaDiagnostic {
   /** 出错/被跳过时**至少要能指回**哪一份文档或哪个来源（绝对路径不进 HTTP 摘要，仅服务端诊断用）。 */

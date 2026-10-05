@@ -25,7 +25,7 @@
  *
  * ## 进程内互斥
  *
- * 本模块的函数都是**同步**的，所以一次调用内部不会被事件循环切开。`withDraftMutex`
+ * 本模块的函数都是**同步**的，所以一次调用内部不会被事件循环切开。`withExpertDraftMutex`
  * 因此只防一件事：同一个草稿的**重入**（例如 `failpoint` 钩子在写入之后又调了一次
  * `stage`）。跨进程的互斥由安装锁（`.install.lock`）负责，不在这里重复实现。
  */
@@ -250,8 +250,11 @@ function fileKey(area: ExpertFileArea, path: string): string {
  *
  * `<areaRoot>/.pending/<draftId>/files/<path>`（人格附件）或
  * `<areaRoot>/.pending/<draftId>/<skillName>/<path>`（skill 包），与规格 §3.1 逐字对应。
+ *
+ * **导出给安装器**（`src/experts/install.ts`）：安装要按同一张账本把暂存原件读回来，
+ * 拼法再写一份就一定会和暂存侧分叉（改一处、漏一处 = 安装读到不存在的路径）。
  */
-function stagedRelativePath(area: ExpertFileArea, draftId: string, path: string): string {
+export function expertStagedRelativePath(area: ExpertFileArea, draftId: string, path: string): string {
   const base = `${EXPERT_PENDING_DIR_NAME}/${draftId}`
   return area === 'skill' ? `${base}/${path}` : `${base}/${EXPERT_PENDING_FILES_DIR_NAME}/${path}`
 }
@@ -279,8 +282,11 @@ const heldDrafts = new Set<string>()
 /**
  * 同步互斥：只在下述情况下拒绝——同一草稿的操作**重入**（典型来源是测试的 `failpoint`
  * 钩子在写文件之后又调一次工具）。串行调用者永远走得到业务逻辑。
+ *
+ * **导出给安装器**（§6.4 第 1 步"取 draft mutex"）：安装必须与暂存/校验共用**同一把**
+ * 进程内互斥，另造一把会让"装到一半又被 stage"变成可能。
  */
-function withDraftMutex<T>(draftId: string, operation: () => T): T {
+export function withExpertDraftMutex<T>(draftId: string, operation: () => T): T {
   if (heldDrafts.has(draftId)) {
     throw new ExpertRepoError(
       'install-in-progress',
@@ -296,14 +302,14 @@ function withDraftMutex<T>(draftId: string, operation: () => T): T {
 }
 
 /**
- * `withDraftMutex` 的工具层包装：重入（同一草稿的第二次操作）**必须变成 `ok:false`
+ * `withExpertDraftMutex` 的工具层包装：重入（同一草稿的第二次操作）**必须变成 `ok:false`
  * 的稳定失败结果**，而不是把异常抛到工具层——工具层只认返回对象。
  */
 function runInMutex<T>(draftId: string, operation: () => T, currentVersion?: number): T | ExpertOperationFailure {
   try {
-    return withDraftMutex(draftId, operation)
+    return withExpertDraftMutex(draftId, operation)
   } catch (error) {
-    const failure = repoFailure(error, 'draftId', currentVersion)
+    const failure = expertRepoFailure(error, 'draftId', currentVersion)
     if (failure !== undefined) return failure
     throw error
   }
@@ -411,7 +417,7 @@ function loadOwnedDraft(
  * 守卫抛错时回填 `currentVersion` 用：守卫失败往往正是因为它读到了另一个版本，
  * 失败结果必须把**当前真实版本**告诉调用方（§5.1 的 `currentVersion?` 字段）。
  */
-function currentVersionOf(context: ExpertDraftContext, draftId: unknown): number | undefined {
+export function expertDraftCurrentVersion(context: ExpertDraftContext, draftId: unknown): number | undefined {
   if (typeof draftId !== 'string' || draftId.trim() === '') return undefined
   const draft = getExpertDraft(context.db, draftId.trim())
   const payload = draft?.payload as unknown as ExpertDraftPayload | undefined
@@ -419,8 +425,8 @@ function currentVersionOf(context: ExpertDraftContext, draftId: unknown): number
   return typeof version === 'number' && Number.isInteger(version) && version >= 0 ? version : undefined
 }
 
-/** 仓储层异常的稳定转换：`field` 由调用方给定位串。 */
-function repoFailure(error: unknown, field: string, currentVersion?: number | null): ExpertOperationFailure | undefined {
+/** 仓储层异常的稳定转换：`field` 由调用方给定位串。**导出给安装器**共用同一份映射。 */
+export function expertRepoFailure(error: unknown, field: string, currentVersion?: number | null): ExpertOperationFailure | undefined {
   if (error instanceof ExpertRepoError) {
     return {
       ok: false,
@@ -642,7 +648,7 @@ export function submitExpertDraft(context: ExpertDraftContext, input: ExpertSubm
       expectedVersion: input.expectedVersion,
     })
   } catch (error) {
-    const failure = repoFailure(error, 'draftId', currentVersionOf(context, input.draftId))
+    const failure = expertRepoFailure(error, 'draftId', expertDraftCurrentVersion(context, input.draftId))
     if (failure !== undefined) return failure
     throw error
   }
@@ -729,7 +735,7 @@ export function submitExpertDraft(context: ExpertDraftContext, input: ExpertSubm
         message: successMessage(updated.payload.contentVersion),
       } satisfies ExpertOperationSuccess
     } catch (error) {
-      const failure = repoFailure(error, 'draftId', owned.payload.contentVersion)
+      const failure = expertRepoFailure(error, 'draftId', owned.payload.contentVersion)
       if (failure !== undefined) return failure
       throw error
     }
@@ -811,7 +817,7 @@ export function stageExpertFile(context: ExpertDraftContext, input: ExpertStageI
       expectedVersion: input.expectedVersion,
     })
   } catch (error) {
-    const failure = repoFailure(error, 'draftId', currentVersionOf(context, input.draftId))
+    const failure = expertRepoFailure(error, 'draftId', expertDraftCurrentVersion(context, input.draftId))
     if (failure !== undefined) return failure
     throw error
   }
@@ -859,7 +865,7 @@ export function stageExpertFile(context: ExpertDraftContext, input: ExpertStageI
     }
 
     const root = areaRoot(context.roots, area)
-    const relative = stagedRelativePath(area, owned.draft.id, path)
+    const relative = expertStagedRelativePath(area, owned.draft.id, path)
     const target = join(root, relative)
     const before = readOwnedStagedBytes(context, root, relative)
     if (before.ok === false) return fail(before.problem.code, 'path', before.problem.message)
@@ -917,7 +923,7 @@ export function stageExpertFile(context: ExpertDraftContext, input: ExpertStageI
       } satisfies ExpertOperationSuccess
     } catch (error) {
       rollback()
-      const failure = repoFailure(error, 'draftId', payload.contentVersion)
+      const failure = expertRepoFailure(error, 'draftId', payload.contentVersion)
       if (failure !== undefined) return failure
       throw error
     }
@@ -939,7 +945,7 @@ export function removeExpertStagedFile(context: ExpertDraftContext, input: Exper
       expectedVersion: input.expectedVersion,
     })
   } catch (error) {
-    const failure = repoFailure(error, 'draftId', currentVersionOf(context, input.draftId))
+    const failure = expertRepoFailure(error, 'draftId', expertDraftCurrentVersion(context, input.draftId))
     if (failure !== undefined) return failure
     throw error
   }
@@ -988,7 +994,7 @@ export function removeExpertStagedFile(context: ExpertDraftContext, input: Exper
 
     const root = areaRoot(context.roots, area)
     /** 落点只按**索引里记的**路径算 —— 绝不拿调用方给的字符串去算目录。 */
-    const relative = stagedRelativePath(area, owned.draft.id, entry.path)
+    const relative = expertStagedRelativePath(area, owned.draft.id, entry.path)
     const target = join(root, relative)
     const before = readOwnedStagedBytes(context, root, relative)
     if (before.ok === false) {
@@ -1028,7 +1034,7 @@ export function removeExpertStagedFile(context: ExpertDraftContext, input: Exper
           ...(context.allowRootLinkUnder === undefined ? {} : { allowRootLinkUnder: context.allowRootLinkUnder }),
         })
       }
-      const failure = repoFailure(error, 'draftId', payload.contentVersion)
+      const failure = expertRepoFailure(error, 'draftId', payload.contentVersion)
       if (failure !== undefined) return failure
       throw error
     }
@@ -1060,7 +1066,7 @@ export function readExpertStagedFile(
   }
 
   const root = areaRoot(context.roots, area)
-  const relative = stagedRelativePath(area, draft.id, entry.path)
+  const relative = expertStagedRelativePath(area, draft.id, entry.path)
   const read = readExpertTextFile(root, relative, {
     maxBytes: EXPERT_STAGED_FILE_MAX_BYTES,
     ...(context.allowRootLinkUnder === undefined ? {} : { allowRootLinkUnder: context.allowRootLinkUnder }),
@@ -1106,6 +1112,17 @@ export interface ExpertValidateInput {
   sessionId?: unknown
 }
 
+/** `validateExpertDraft` 的行为开关（默认值就是既有 HTTP 路径的行为）。 */
+export interface ExpertValidateOptions {
+  /**
+   * `false` = **调用方已经持有**该草稿的进程内互斥，不要再取一次。
+   *
+   * 安装器的 `confirm` 就是这样：它先取互斥（挡住并发确认），第 3 步才在同一调用栈里
+   * 调 `validateExpertDraft` 重新跑校验。默认 `true`。
+   */
+  mutex?: boolean
+}
+
 /** 读正式技能目录里已有的同名 skill 管理清单（判"能不能覆盖"）。 */
 function readExistingSkillInstall(
   context: ExpertDraftContext,
@@ -1148,18 +1165,22 @@ function readExistingSkillInstall(
  * - **验证前重读真实文件**：索引只是账本，磁盘才是事实；不一致一律
  *   `staged-file-changed`，不自动确认、不替用户"修好"。
  */
-export function validateExpertDraft(context: ExpertDraftContext, input: ExpertValidateInput): ExpertValidateResult {
+export function validateExpertDraft(
+  context: ExpertDraftContext,
+  input: ExpertValidateInput,
+  options: ExpertValidateOptions = {},
+): ExpertValidateResult {
   const requireOwner = Object.prototype.hasOwnProperty.call(input, 'sessionId')
   let owned: ExpertOwnedDraft
   try {
     owned = loadOwnedDraft(context, { draftId: input.draftId, sessionId: input.sessionId, expectedVersion: input.expectedVersion }, requireOwner)
   } catch (error) {
-    const failure = repoFailure(error, 'draftId', currentVersionOf(context, input.draftId))
+    const failure = expertRepoFailure(error, 'draftId', expertDraftCurrentVersion(context, input.draftId))
     if (failure !== undefined) return failure
     throw error
   }
 
-  return runInMutex<ExpertValidateResult>(owned.draft.id, () => {
+  const run = (): ExpertValidateResult => {
     const payload = owned.payload
     const errors: ExpertIssue[] = []
     const warnings: ExpertIssue[] = []
@@ -1209,7 +1230,7 @@ export function validateExpertDraft(context: ExpertDraftContext, input: ExpertVa
         continue
       }
       const root = areaRoot(context.roots, file.area)
-      const relative = stagedRelativePath(file.area, owned.draft.id, file.path)
+      const relative = expertStagedRelativePath(file.area, owned.draft.id, file.path)
       const read = readExpertTextFile(root, relative, {
         maxBytes: EXPERT_STAGED_FILE_MAX_BYTES,
         ...(context.allowRootLinkUnder === undefined ? {} : { allowRootLinkUnder: context.allowRootLinkUnder }),
@@ -1349,11 +1370,18 @@ export function validateExpertDraft(context: ExpertDraftContext, input: ExpertVa
         validation,
       } satisfies ExpertValidateSuccess
     } catch (error) {
-      const failure = repoFailure(error, 'draftId', payload.contentVersion)
+      const failure = expertRepoFailure(error, 'draftId', payload.contentVersion)
       if (failure !== undefined) return failure
       throw error
     }
-  })
+  }
+
+  /**
+   * 安装器的 `confirm` 已经持有互斥，再取一次会被自己挡住（`install-in-progress`）
+   * —— 那是"并发请求"的信号，不该出现在同一个调用栈里。所以给它一条显式的
+   * **复用已有互斥**通道；默认仍然自己取（HTTP 校验路径靠它挡住并发）。
+   */
+  return options.mutex === false ? run() : runInMutex<ExpertValidateResult>(owned.draft.id, run)
 }
 
 /** 草稿的只读视图（供接线层拼 HTTP 响应，不暴露任何绝对路径）。 */

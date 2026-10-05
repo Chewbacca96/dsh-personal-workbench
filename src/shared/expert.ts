@@ -106,14 +106,8 @@ export const EXPERT_AUTO_SUMMON_META_KEY = 'expert_auto_summon'
 /** `ai_session_scope` 字典 code：专家生成会话。 */
 export const EXPERT_GENERATION_SCOPE_CODE = 'expert_generation'
 
-/** 安装器/持久化保留名：**模型不得**通过暂存工具写这些文件。 */
-export const EXPERT_RESERVED_FILE_NAMES: readonly string[] = [
-  'publication.json',
-  'provenance.json',
-  'workbench-install.json',
-  'install-journal.json',
-]
-
+/** 安装日志主文件名。 */
+export const EXPERT_INSTALL_JOURNAL_FILE_NAME = 'install-journal.json'
 /** 跨进程安装锁的文件名（放在 personas 根下）。 */
 export const EXPERT_INSTALL_LOCK_FILE_NAME = '.install.lock'
 /** 未提交暂存区的目录名（放在 personas / skills 根下）。 */
@@ -122,10 +116,24 @@ export const EXPERT_PENDING_DIR_NAME = '.pending'
 export const EXPERT_GENERATED_DIR_NAME = 'generated'
 /** 安装器写、用于上一轮恢复的日志备份名。 */
 export const EXPERT_JOURNAL_PREVIOUS_NAME = 'journal.previous.json'
-/** 安装日志主文件名。 */
-export const EXPERT_INSTALL_JOURNAL_FILE_NAME = 'install-journal.json'
 /** 暂存区里存放附件文件的目录名。 */
 export const EXPERT_PENDING_FILES_DIR_NAME = 'files'
+/** 受管人格的发布门文件名（`generated/<UUID>/publication.json`，**只有安装器写**）。 */
+export const EXPERT_PUBLICATION_FILE_NAME = 'publication.json'
+/** 安装器写的来源登记文件（`generated/<UUID>/provenance.json`）。 */
+export const EXPERT_PROVENANCE_FILE_NAME = 'provenance.json'
+/** 已安装 skill 的管理清单文件名（`<skillName>/workbench-install.json`，**只有安装器写**）。 */
+export const EXPERT_SKILL_INSTALL_FILE_NAME = 'workbench-install.json'
+/** `publication.json` 的版本（形状守卫用；不是 `ExpertInstallJournal.version`）。 */
+export const EXPERT_PUBLICATION_VERSION = 1
+
+/** 安装器/持久化保留名：**模型不得**通过暂存工具写这些文件。 */
+export const EXPERT_RESERVED_FILE_NAMES: readonly string[] = [
+  EXPERT_PUBLICATION_FILE_NAME,
+  EXPERT_PROVENANCE_FILE_NAME,
+  EXPERT_SKILL_INSTALL_FILE_NAME,
+  EXPERT_INSTALL_JOURNAL_FILE_NAME,
+]
 
 // ---------------------------------------------------------------------------
 // 限值（§1.4）

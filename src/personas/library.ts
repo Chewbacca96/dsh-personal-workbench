@@ -47,6 +47,7 @@ import {
   type PersonaSummary,
 } from '../shared/persona.js'
 import { normalizePersonaText, parsePersonaDocument } from './parse.js'
+import { isManagedPersonaId, readManagedPersonaPublication } from './managed.js'
 
 /**
  * 平台口径的比较/去重**唯一实现在 `shared/persona.ts`**（客户端也要用同一把尺子，
@@ -261,6 +262,53 @@ function isMarkdownFile(name: string): boolean {
   return name.toLowerCase().endsWith('.md')
 }
 
+/**
+ * **受管角色的发布门**（方案 v0.3 §6.2）—— 发现与解析**共用**的唯一判定。
+ *
+ * ## 为什么需要它
+ *
+ * 生成式新建的专家，其正式文件是**分好几步**落到用户根下的（附件目录 → 技能目录 →
+ * 人格文档 → 最后才是 `publication.json`）。如果解析器只看"有没有 `.md` 文件"，
+ * 那么从"人格文档已 rename 到正式位置"到"DB 事务提交 + publication.json 写完"之间
+ * 的任何一个瞬间，**一份还没确认的专家就已经能被列出来、能被绑定、能被拉去当人格用了**。
+ *
+ * 所以判定不是"文件在不在"，而是"**同名附件目录里的 `publication.json` 说没说 ready**"：
+ * 它是安装器**最后**写、且**只由安装器写**的文件（`readManagedPersonaPublication` 会
+ * 核对 `version=1` + `expertId` 一致 + `ready=true`）。
+ *
+ * ## 只管受管角色（普通角色行为一字不变）
+ *
+ * 三个条件全部满足才启用门，任一不满足都直接放行：
+ *
+ * 1. 来源必须是**用户根**（内置/外部目录里的文件工作台从来不写，谈不上"没确认完"）；
+ * 2. ID 必须**精确匹配** `generated/<小写UUID>`（`isManagedPersonaId`）；
+ * 3. 同名目录里的 `publication.json` 必须就绪。
+ *
+ * 手工放进用户根的角色（哪怕它叫 `generated/xxx.md`）也会被门挡住 —— 这是刻意的：
+ * 那个命名空间**属于安装器**，混用会让"能不能被发现"变得不可解释。缺文件、读写失败、
+ * JSON 坏、`ready:false` 全是同一种结论：**跳过 + `installation-incomplete` 诊断**。
+ *
+ * @returns `undefined` = 放行；否则是必须补进诊断列表的那一条（调用方负责 `continue`）。
+ */
+function managedPublicationGate(
+  source: PersonaLibrarySource,
+  id: string,
+  path: string,
+  sourceKey: string,
+): PersonaDiagnostic | undefined {
+  if (source.kind !== 'user') return undefined
+  if (isManagedPersonaId(id) === false) return undefined
+  const publication = readManagedPersonaPublication(source.root, id)
+  if (publication.ok) return undefined
+  return {
+    sourceKey,
+    id,
+    path,
+    code: 'installation-incomplete',
+    message: `角色「${id}」是工作台生成式新建的受管角色，但它的发布门还没就绪（${publication.reason}：${publication.message}）。按设计**跳过这个文档**：不在列表里出现、也不能被解析/绑定；请在「工作台 → 专家」里把这次安装确认完（或修复它）后再用。`,
+  }
+}
+
 /** 读取单个角色文档（读取前先判大小；解析交给纯解析器）。 */
 export function readPersonaDocumentFile(path: string): { ok: true; document: PersonaDocument; revision: string } | { ok: false; diagnostics: PersonaDiagnostic[] } {
   let size: number
@@ -330,6 +378,12 @@ export function discoverPersonas(options: PersonaLibraryOptions = {}): PersonaDi
     for (const path of walked.docs) {
       const rel = relative(rootResolved, resolve(path)).split(sep).join('/')
       const id = personaIdFromRelativePath(rel)
+      /** §6.2 发布门：未确认的受管角色**先于读文件**就被跳过（不让它半成品地出现）。 */
+      const gated = managedPublicationGate(source, id, path, sourceKey)
+      if (gated !== undefined) {
+        diagnostics.push(gated)
+        continue
+      }
       const read = readPersonaDocumentFile(path)
       if (read.ok === false) {
         diagnostics.push(...read.diagnostics.map((diagnostic) => ({ ...diagnostic, id, sourceKey })))
@@ -449,6 +503,16 @@ export function resolvePersona(
         message: `角色「${id}」的来源（${summary.source}）已不可达：${source.root}。已明确报错，**不切换到其他来源**。`,
       }],
     }
+  }
+  /**
+   * §6.2：**这条 resolve 路径也必须过门**。上面 `discoverPersonas` 已经挡过一次，
+   * 但这里自己又 walk 了一遍（为了"不切换到其他来源"），两次遍历之间
+   * `publication.json` 可能被删掉/写坏 —— 那样就会从**这条**路径读到一份
+   * 还没确认的正式文件。所以定位到文件之后、读它之前，再判一次。
+   */
+  const gated = managedPublicationGate(source, id, found, sourceKey)
+  if (gated !== undefined) {
+    return { ok: false, reason: 'not-found', diagnostics: [gated] }
   }
   const read = readPersonaDocumentFile(found)
   if (read.ok === false) {

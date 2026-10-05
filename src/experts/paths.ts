@@ -112,9 +112,9 @@ export function hasAllowedTextExtension(name: string): boolean {
 export function checkExpertRelativePathShape(
   area: ExpertFileArea,
   relativePath: unknown,
-  options: { platform?: string } = {},
+  options: { platform?: string; allowReservedNames?: readonly string[] } = {},
 ): ExpertPathProblem | undefined {
-  void options
+  const allowReservedNames = options.allowReservedNames ?? []
   if (typeof relativePath !== 'string' || relativePath.trim() === '') {
     return { code: 'invalid-path', message: '路径必须是非空字符串' }
   }
@@ -159,7 +159,7 @@ export function checkExpertRelativePathShape(
     if (RESERVED_WINDOWS_BASENAMES.has(stem)) {
       return { code: 'invalid-path', message: `路径段是 Windows 保留名，拒绝：${segment}` }
     }
-    if (EXPERT_RESERVED_FILE_NAMES.includes(segment)) {
+    if (EXPERT_RESERVED_FILE_NAMES.includes(segment) && allowReservedNames.includes(segment) === false) {
       return { code: 'invalid-path', message: `「${segment}」是安装器保留名，模型不得写入` }
     }
   }
@@ -225,10 +225,13 @@ export function expertPathCompareKey(area: ExpertFileArea, relativePath: string,
 export function validateExpertRelativePath(
   area: ExpertFileArea,
   relativePath: unknown,
-  options: { platform?: string; existing?: readonly string[]; self?: string } = {},
+  options: { platform?: string; existing?: readonly string[]; self?: string; allowReservedNames?: readonly string[] } = {},
 ): ExpertPathProblem | undefined {
   const platform = options.platform ?? process.platform
-  const shape = checkExpertRelativePathShape(area, relativePath, { platform })
+  const shape = checkExpertRelativePathShape(area, relativePath, {
+    platform,
+    ...(options.allowReservedNames === undefined ? {} : { allowReservedNames: options.allowReservedNames }),
+  })
   if (shape !== undefined) return shape
   const raw = relativePath as string
   const key = expertPathCompareKey(area, raw, platform)

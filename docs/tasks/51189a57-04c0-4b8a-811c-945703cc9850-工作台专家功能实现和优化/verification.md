@@ -117,7 +117,8 @@ console.log(JSON.stringify(counts));
 | P0 目标执行环境重新核对 | ✅ 2026-10-05 已执行 | 见 §7；HEAD 50d85b9、SDK 0.2.0-rc.2、依赖的公开接口全部存在。原状态“未执行（本轮只核对了本机设计环境）”保留于此 |
 | P1 类型/设置/字典种子/路径与来源校验 | ✅ 2026-10-05 已执行 | 见 §8；typecheck 0 / build 0 / expert 三件套 43 pass / 回归 80 pass，AX-E01–E06 全 pass。原状态“未实现”保留于此 |
 | P2 草稿提交/分文件暂存/整包校验 | ✅ 2026-10-05 已执行 | 见 §9；typecheck 0 / build 0 / P2 三件套 77 pass / 回归 105 pass，AX-E07–E14 全 pass。原状态“未实现”保留于此 |
-| P3–P5 生成与安装主链 | 未实现 | 无产品运行结果 |
+| P3 安装/受管发布门/中断恢复 | ✅ 2026-10-05 已执行 | 见 §10；typecheck 0 / build 0 / 11 个测试文件 207 pass 0 fail，AX-E15–E23 全 pass；含 17 个故障点矩阵与 4 例跨进程真崩溃。原状态“未实现”保留于此 |
+| P4–P5 生成会话与调用接线 | 未实现 | 无产品运行结果 |
 | P6–P7 专家调用主链 | 未实现 | 无产品运行结果 |
 | P8 客户端界面 | 未实现 | 无浏览器结果 |
 | P9 包/真实 SDK/真实 LLM | 未执行 | 不以 fake provider 代替 |
@@ -279,3 +280,69 @@ dry-run 通过、目标不等于当前实例且任务已有测试实例授权后
 - 偏差 3：skill 包单件超限只报 `file-too-large`，不多报 `skill-package-invalid`。
 - 过程事实：实施子代理在写完两个源文件后中断（无收尾消息，`pnpm typecheck` 退出码 2：`drafts.ts:64` 模块导入错、失败对象 `code` 类型过宽、`:1183` area 类型不匹配）；主会话诊断后发回修复清单，补测并全绿。本批是**跨轮续作**，不是一次成功，如实记录。
 - 仓库本地 `core.autocrlf` 被外部改成 `false`，而 HEAD blob 全为 LF、工作树多为 CRLF → 直接把改动 `git add` 会产生整文件 CRLF churn；本批文件已统一成 LF 后再提交（`git diff --stat` 只显示真实改动 +51/−3）。
+
+## 10. P3 施工记录（2026-10-05 执行）
+
+完整交接（导出签名逐字、故障点矩阵、接线义务、偏差清单）见同目录 [`P3-handover.md`](./P3-handover.md)；这里只记录**证据**。
+
+### 10.1 命令与退出码（主会话独立复跑，非只读子代理报告）
+
+| 命令 | 退出码 | 结果 |
+|---|---|---|
+| `pnpm typecheck` | 0 | 无输出 |
+| `pnpm build` | 0 | 客户端 `lib/client.js` 552.64 kB |
+| `node --test --test-concurrency=1`（expertInstall + P1/P2 回归 + persona 系，共 10 个文件） | 0 | `tests 194 / pass 194 / fail 0`（第一轮复核） |
+| `node --test --test-concurrency=1`（再加 `test/expertRecovery.test.mjs`，共 11 个文件） | 0 | `tests 207 / pass 207 / fail 0`（第二轮复核，`duration_ms 15590`） |
+
+`SUMMARY typecheck=0 build=0 p3plusregression=0`（194）→ `SUMMARY typecheck=0 build=0 recovery_full=0`（207）。`build` 与 `node --test` 同一条命令：外部会话的 `probe-*-mutations.mjs` 会删 `lib/`。
+
+### 10.2 AX-E15–E19 / E23（第一轮：install.ts + managed.ts）
+
+| 断言 | 结论 | 证据 |
+|---|---|---|
+| AX-E15 原创无技能确认 | ✅ | DB `confirmed` + `publication.ready` + catalog 可取 + 附件字节比对 |
+| AX-E16 MIT + 两 skill，ready 前不可发现 | ✅ | 4 个 failpoint 快照：`discoverPersonas`/`resolvePersona` 均读不到且给 `installation-incomplete` |
+| AX-E17 重复确认/并发 | ✅ | 同 `expertId`/`confirmResult`、文件数不增；重入 → `install-in-progress` |
+| AX-E18 不同 hash 同名 skill | ✅ | 两例（提交期 + 确认时重新校验）；旧 skill 字节不变、无正式入口 |
+| AX-E19 同 hash ready skill 复用 | ✅ | 记 `reusedPaths`、字节不变；补偿只撤本次 `createdPaths` |
+| AX-E23 锁三档 | ✅ | 活→`install-busy`；同机死→回收；不明/别主机→`install-lock-owner-unknown` 不强删；不释放别人的锁 |
+
+另有 §6.2 坏 `publication.json` 三种形态、§6.5 两条补偿路径、§6.3 跨 DB 跳过的额外用例。
+
+### 10.3 AX-E20–E22（第二轮：真崩溃 + 故障矩阵）
+
+| 断言 | 结论 | 证据 |
+|---|---|---|
+| AX-E20 发布点失败（DB 未确认） | ✅ | 17 个 failpoint 的进程内补偿矩阵（每个点断言 DB/FS/可见性/journal 终态/`.build*` 清理/**暂存 sha256 不变**/同版本重试成功） |
+| AX-E20 真崩溃 | ✅ | 子进程跑产品代码自身的 stage→validate→confirm，在目标点 `process.exit(97)`（`spawnSync` 断言 `status=97` + marker 存在），父进程在同一 dbPath 重开新实例恢复：`@prepared`、`@files-published` 两例 |
+| AX-E21 COMMIT 后中断 | ✅ | 5 个提交后 failpoint + 真崩溃 `@db-committed`/`@ready`：`completed-publication`（只多一个 `publication.json`）/`already-ready`，重复确认幂等，`generated/` 逐字节不变 |
+| AX-E22 外部修改/日志损坏/他库日志 | ✅ | 主坏+备份好 → `degraded:true` 并用**备份**决策补偿；两份都坏 → `repair-required` 且同轮健康草稿仍 `already-ready`（`scanned=2`）；`ownerDbKey` 缺失/null/空串 → `skipped-owner-unknown`，异库 → `skipped-foreign-owner`（四种都不动文件、日志字节不变）；两 DB 共享一根的最小端到端 |
+
+### 10.4 反向注入验证（主会话亲自执行）
+
+`src/experts/install.ts` 的 `parseJournal` 修复（非字符串 `ownerDbKey` 归一为 `''`）由主会话独立反向注入确认：
+
+- 装回 bug 后：`pnpm build` 退出码 0，`node --test --test-concurrency=1 test/expertRecovery.test.mjs` → `ℹ tests 13 / ℹ pass 12 / ℹ fail 1`，失败原文 `actual: 'repair-required', expected: 'skipped-owner-unknown'`。
+- 还原后：`ℹ tests 13 / ℹ pass 13 / ℹ fail 0`，源码内 `REVERSE-INJECTION PROBE` 残留 0 处，`CR-count 0`（LF）。
+
+### 10.5 交付物与接线义务
+
+- 新增 `src/experts/install.ts`（1916）、`src/personas/managed.ts`（350）、`test/expertInstall.test.mjs`（1027，12 test）、`test/expertRecovery.test.mjs`（1276，13 test）；修改 `src/personas/library.ts`、`src/shared/persona.ts`、`src/shared/expert.ts`、`src/experts/paths.ts`、`src/experts/drafts.ts`、`src/db/repo/experts.ts`、`tsconfig.build.json`。**未改** `src/index.ts` / `src/tools.ts` / `src/api/**`。
+- **后续接线义务**：①启动时**先** `recoverExpertInstallations` **再**注册技能 provider，`repair-required` 不得阻止启动；②`confirmExpertDraft` 只把 `InstallFailure`/`ExpertRepoError` 转成 `ok:false`，**其它异常会抛出** → HTTP/工具层必须 try/catch 且不透出原始日志/绝对路径；③`sessionId` 取 `exec.agent.session.id`，HTTP 路径不传该键；④`context.failpoint` 只给测试；⑤P4 注册 provider 时 `refreshSkills` 接 `control.invalidate`，list/get 用 `readManagedSkillInstallState` 判 ready。
+
+### 10.6 未验证项（如实标注，不填通过）
+
+- 生产启动接线未做（`recoverExpertInstallations` 无调用点）；真实 provider 未注册（`refreshSkills` 仍是注入 hook）。
+- 字节撕裂（SIGKILL/断电打断 `fsync`/`rename` 中间态）未测 —— §6.3 末段明确排除。
+- 无真实 dsh 实例级端到端；`~/.dsh/workbench/{personas,skills}` **仍不存在**（本批只在 `mkdtempSync` 目录写文件）。
+- 恢复路径下的 `reusedPaths` 未单独测；`repair-required` 之后的人工修复流程未测；多条同时中断未测。
+- 未跑全仓 `test/*.test.mjs`；`test/db.test.mjs:35` 的既有 Windows 清理期 EPERM 未触碰（非本批回归）；未用 `--frozen-lockfile` 复验。
+
+### 10.7 规格偏差与过程事实
+
+- 偏差 1【已修+反向注入】：`parseJournal` 把 `ownerDbKey` 缺失判成日志损坏，与 §6.3/AX-E22 矛盾（见 10.4）。
+- 偏差 2【记录未改】：已提交分支的补偿把日志钉成 `db-committed`，`install.after-ready-journal` 抛错会把日志从 `ready` 降级为 `db-committed`；仅测试可达，恢复只看 DB + publication → 仍 `already-ready`，无功能影响。
+- 偏差 3【记录未改】：publication 已就绪时的幂等回放不重写日志（停在 `db-committed`）；规格未要求。
+- 偏差 4：`install.after-validation` 的异常原样抛给调用方（该点在补偿 try 之外，磁盘/DB 零改动）→ 强化了 10.5 的接线义务 ②。
+- 偏差 5：未预期异常统一回 `install-repair-required`；中断型补偿 `lastInstallError.code='canceled'`。
+- 过程事实：P3 由**同一子代理分两轮**完成（第一轮 1914 行 install.ts + managed.ts + 12 test；第二轮 +13 test 与 1 处缺陷修复），两轮都经主会话独立复跑（194 → 207）与逐段源码复核。第一轮过程中撞到两个真缺陷（draft mutex 重入被自己挡住导致 11 例全红；外层 catch 漏认 `InstallFailure`），均已修；测试侧另有 3 处用例自身问题（sessionId 复用串味、journal 目录未建、漏 import），如实记录。
