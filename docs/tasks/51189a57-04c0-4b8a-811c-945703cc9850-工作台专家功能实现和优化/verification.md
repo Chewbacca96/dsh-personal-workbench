@@ -636,3 +636,233 @@ dry-run 通过、目标不等于当前实例且任务已有测试实例授权后
 4. 生成内容质量（原创专家人格正文是否可用）未验。
 5. 卸载/重装/升级路径、macOS/Linux 未测。
 6. 链的稳定性：4 次真实链里 2 次被浏览器冷启动竞态掐断（§16.3），未定位确定性根因。
+
+---
+
+## 17. P10 施工记录（模型层三项：从 skip 改成真实会话通道的真检查）
+
+> 本批**只改 `scripts/verify/suites/expert.mjs` + 文档**，未改任何产品源码（`src/**` / `test/**` / `package.json` 一行未动）。
+> 详细交接（机制、证据位置、后续义务）见同目录 `P10-handover.md`。**§17 不重复 §16 的结论，也不改 §16 的措辞。**
+
+### 17.1 任务口径（用户已确认，逐条照办）
+
+1. 「生成专家」的通道**不是**插件直接调 LLM，而是：插件客户端新建一个**独立 DSH 会话**，把请求当普通用户消息发进去，
+   该会话自己的 AI 再调用插件注册的 5 个草稿工具完成生成。证据位置：`src/client/hooks/useWorkbenchExperts.ts:746`
+   （`sessions.create({ workspaceId })`）、`:789-792`（`session.prompt([...], 'queue')`）、`:630-645`（prompt 构造）、
+   `src/experts/tools.ts:559-576`（5 个生成工具）、`src/index.ts:555`（装配）。**用户明确要求这条通道保持现状。**
+2. 因此模型层验收**必须通过真实 DSH 会话**完成：**禁止**换假 provider、**禁止**伪造模型响应、**禁止**新增隐式 skip 白名单。
+3. 本批把 P9 在 `scripts/verify/suites/expert.mjs` 里写成 skip 的 3 条模型层断言（原 `:1037` / `:1044` / `:1051`）换成真跑，
+   AX id 原样保留（AX-E60 / AX-E61 / AX-E62），层名按 P9 既有口径记 `B`。
+4. 任一步骤若因环境或宿主行为**无法确定性完成**：写 `skip` + **具体阻塞原因 + 收集到的原始证据**，**绝不假通过**，
+   也**不往** `scripts/dev-verify.mjs` 的 `ALLOWED_REQUIRED_SKIPS` 加白名单。
+
+### 17.2 交付物（**未提交、未 push**）
+
+| 文件 | 行数 / sha256（P10 收工时） | 改动 |
+|---|---|---|
+| `scripts/verify/suites/expert.mjs` | 2055 行 / `8C3BD6D16D5705D10BE4FCF19F55150970AC5609D5E84089B89B93164C0AFDD0`（`git diff --numstat` = `+1054 −114`，CR 字节 0） | 3 条模型层 skip → 真检查；新增会话 JSONL 读取 / 草稿行复读 / 正式库反查 / 真实 composer 派发 / 冷启动换会话 |
+| `docs/tasks/51189a57-…/P10-handover.md` | 274 行（新增） | 本批交接（机制、逐条结果、命令与退出码、偏差、未验证项、后续义务） |
+| `docs/tasks/51189a57-…/verification.md` | 追加 §17 | 本记录 |
+| `docs/tasks/51189a57-…/P9-handover.md` | 只在末尾追加 §13（`+16 −0`） | 只指到 P10，不动既有内容 |
+| `docs/tasks/ed644638-…/执行日志.md` | 追加「P10 过程事实」段 | 过程事实 |
+
+**未改**（按边界）：`acceptance.md`、`implementation-plan.md`、`src/**`、`test/**`、`package.json`、`pnpm-lock.yaml`、`.github/**`、`docs/releases/**`、`docs/adr/**`。
+工作区里 `acceptance.md` / `implementation-plan.md` / `docs/design/2026-10-03-专家市场-调研.md` 的既有改动**来自其他会话**，本批未触碰。
+
+### 17.3 施工内容（`scripts/verify/suites/expert.mjs`）
+
+| 位置 | 改动 |
+|---|---|
+| 头部表 | 删掉「M 层（真实模型）… 未实现」，改成 **B 层**：「真浏览器走 UI 开生成会话 + 读会话 JSONL 判模型真调了哪些工具 + 目标库复读草稿行；拿不到就如实 skip + 原始证据」 |
+| import | `+ node:crypto createHash`、`+ node:zlib zstdDecompressSync` |
+| 删除 | 旧的 `tryObserveModelToolCalls()`（P9 那条 `dsh headless --json` 死路，实测 `error: unknown option '--json'`）与旧的三条 `skip` `checkModelLayer()` |
+| 新增 | `MODEL_CALL_BUDGET = 6` + `modelCallsMade` / `modelCallLog`；`EXPERT_GENERATION_TOOL_NAMES`（5 个工具名**逐字副本**，刻意不 import 产品源码，好让口径漂移能独立变红） |
+| 新增 | `sendModelMessage()`：真实点击 composer + `Input.insertText` + `Input.dispatchKeyEvent`(Enter)，记 `{label,sessionId,startedAt,typedPrefix,ok}` 并累计预算 |
+| 新增 | `snapshotSessionDirs()` / `sessionDirOf()` / `readSessionEvents()`（**多帧 zstd 逐帧解压**）/ `sessionSummary()`（`cwd/parentSession/delegationDepth/titles/toolsOffered/toolCalls/toolResults/userMessages/frames`） |
+| 新增 | `readPluginGenerationPrompt()`：从 `src/client/hooks/useWorkbenchExperts.ts` 抽 `buildExpertGenerationPrompt` 的**字面量**拼回同一份 prompt（要求恰好替换 2 处插值），只作 composer 兜底 |
+| 新增 | `readExpertDraftRow()`（`node:sqlite` 只读打开 `--db-path` 读 `payload_json`）、`listPendingExpertDraftSessionIds()`、`readRecentExpertDraftRows()`、`sessionDirBySessionId()`、`expertInUserLibrary()`（递归查 `~/.dsh/workbench/personas`） |
+| 新增 | `startGenerationViaUi()`（真浏览器四步，工作区按 `<option>` 的 `textContent` 归一化匹配、找不到就如实报 `no-matching-workspace`）、`runExpertGenerationProbe()`、`probeExpertMentionChannel()` |
+| 关键实现 | **换会话 = 关掉当前浏览器实例 + 冷启动一个新实例**（`BROWSER_PATH`），再读 SPA 自己的 `localStorage['dsh.sessions.current']` 判定；同一实例里整页重载**不会**换（实测），`?session=` 对 SPA 也无效。`DSH_VERIFY_EXPERT_SWITCH_MS`（默认 300000）是这条循环的预算 |
+| 关键实现 | 会话 JSONL 是**多帧 zstd 拼接**：`zstdDecompressSync` 只解第一帧，必须扫 `28 b5 2f fd` 偏移逐帧解压再拼（run 14 实测 30 帧 / 0 失败） |
+| 关键实现 | 会话发现**以磁盘为准**（先按项目键 / `session` 事件 `cwd` 认目录，再用它的 id 去 DB 认草稿行）；项目键规则 = 路径里 `:` 直接删、`\` 与 `.` 换 `-`、两端加 `--` |
+| 新判据 | `AX-E60-b`：生成会话 `request/header` 的 `tools[]` 里 5 个生成工具**逐个到位**；`AX-E61-a`：真实 HTTP catalog 有可引用专家 **且** 页面 composer 在位；`AX-E62-a`：`GET /experts/capabilities` 的 `autoSummon.{available,enabled}` 可读且是 boolean |
+
+### 17.4 规格偏差（如实记录）
+
+1. **AX-E60 走的是「真实 UI 开店 + 真实 composer 补发」**，不是「插件排队的那条 prompt 自己派发」。原因是一条**真机产品缺陷**（§17.5），
+   详见 `P10-handover.md` §2.3。`report.layers.model.generation.findings.dispatchPath` 如实写 `plugin-queued` 或 `composer-fallback`
+   （run 14 实测是 `composer-fallback`），两者在台账里**分开写**，不合并成一句「走真实会话通道」。
+2. **换会话用「关浏览器 + 冷启动新实例」**：实测只有全新进程冷启动才会让 SPA 把 `dsh.sessions.current` 解析成最新那个会话
+   （`?session=` 对 SPA 无效；工作台面板打开时 composer 不存在；侧栏列不出"还没有任何消息"的会话）。
+   这是**用宿主自己的状态**判定，没有伪造任何模型输出，也没有新增 skip 白名单。
+3. 模型层 AX id 从 3 条扩到 6 条（`AX-E60`、`AX-E60-b`、`AX-E61-a`、`AX-E61`、`AX-E62-a`、`AX-E62` 各自独立可失败），原 id 与语义未变，只是把"通道前置"单列成会真红的项。
+4. AX-E61 / AX-E62 的端到端模型后半**仍记 skip**，阻塞原因是**真实模型调用预算**（≤6 次，本批累计 5 次，见 §17.6），不是"环境不具备"。
+
+### 17.5 P10 实测发现的**产品缺陷**（本批只记录，边界内不许改产品代码）
+
+**现象**：真浏览器走完「新建专家 → 填请求 → 选工作区 → 点开始生成」后：
+
+- 宿主**确实**新建了独立会话；服务端**确实**建出 `task_drafts` 行（`kind_code='expert'`、`status_code='pending'`、`session_id` = 那个新会话）；
+- 但页面报 `data-wb-expert-error="generation-start-failed"`（「服务端没有返回草稿，已停止…」）；
+- 那个生成会话的 JSONL **永远只有 4 条事件**（`session` / `permission/preset` / `sandbox/mode` / `approval/policy`），
+  一条 `user/message` 都没有 —— 前端在第 7 步就 return，第 8 步 `session.prompt([...], 'queue')`（`useWorkbenchExperts.ts:789-792`）**根本不执行**。
+
+**根因（真实 HTTP 复现，非推断）**：`POST /api/workbench/experts/generation-start` 的真实响应是
+
+```json
+{"ok":true,"draft":{"draftId":"d051b42d-…","statusCode":"pending","contentVersion":0,"phase":"editing","expertId":"generated/534363a4-…","request":"P10 形状探针（可放弃）","personaMd":"","provenance":null,"skills":[],"files":[],"validation":null}}
+```
+
+服务端 `expertDraftView()` 给的是 **`draftId`**（`lib/experts/drafts.js:1083-1098`；路由 `lib/api/routes/experts.js:42-52`），
+前端读的是 **`res.draft.id`**（`lib/client/hooks/useWorkbenchExperts.js:549-551`）⇒ `typeof draft.id !== 'string'` ⇒ 提前 return。
+
+**P9 交接 §11 第 1 条记录过一次同源修正（"`draft.id` → `draftId`"），但那一处修的是套件断言，产品侧这条路径没有修。**
+
+**影响**：走 UI 的「新建专家 → 开始生成」永远无法让模型真的开跑（草稿只能手动打开生成会话再补发消息）。
+本批按"如实记录 + 绕过去取证"处理，**未改产品代码**。
+
+### 17.6 真实模型调用台账（上限 6 次）
+
+> `report.layers.model.calls` 里逐条记 `{label, sessionId, startedAt, typedPrefix, ok}`；下表是汇总口径。
+
+| # | 用途 | 会话 | 发起方式 | 结果 |
+|---|---|---|---|---|
+| 1 | P10 侦察：手工 composer 发 `回复就绪`（**不是**本批套件调用，用于验证通道可用） | `session-cf3547c1-683d-4f4d-9549-8e1cb5745380` | 真浏览器 `Input.insertText` + Enter | 成功（14:06:40 建会话 → 14:13:39 跑完；`request/header` 58 个工具含 5 个生成工具） |
+| 2 | P10 派发探针：打开生成会话 → 静置 90s → 真实 composer 发一条短消息 | `session-2d5b4da8-31f9-4d84-acbf-78dfca0912fe` | 真浏览器 `Input.insertText` + Enter | 成功：**+20s 就 `turn/start`**，23 事件、`request/header` 57 个工具（证明"通道可用，只是新会话要先被认领"） |
+| 3 | run 7 的 composer 兜底（换会话还没摸清，发岔了） | `session-a7ec0626-f46b-40cf-ac37-3b36fca998d5` | 真浏览器 composer | 成功：该会话收到 4280 字符插件 prompt 并调 `workbench_get_expert_draft` |
+| 4 | run 9 的 composer 兜底（同样发岔） | `session-f4d437a3-00cc-4b73-8fd4-7b438d32e2a0` | 真浏览器 composer | 成功：`get` → `submit`×3 → `validate`（0 错 0 警）→ `render_ui` |
+| 5 | **run 14 的 composer 兜底（发进被追踪的会话）** | `session-8c32e4b8-e9c6-4a41-ad1d-f5a792e143b9` | 真浏览器 composer（冷启动换会话后） | 成功：**AX-E60 / AX-E60-b 转绿**；本层记账 `1 次 / 上限 6`，本批累计 5 次 |
+
+> 第 3、4 次的"发岔"发生在换会话机制摸清之前 —— 它们其实已经**真实验证了生成通道端到端可用**，
+> 只是当时套件追踪的是另一个会话，所以判成 `toolCalls:[]`。
+
+
+本批套件自身**最多**会发起 1 次真实调用（AX-E60 的生成 prompt，composer 兜底那条），run 14 实测记账 `1 次`；
+`AX-E61` 端到端还需 ≥3 次（父轮 + 子代理轮 + 复核父绑定轮），`AX-E62` 还需 2 轮 + 1 个子代理
+⇒ 在本批 ≤6 次预算下**装不下**（本批累计已用 5 次），因此这两条的模型后半如实记 skip（原因写进 `skippedChecks`）。
+
+### 17.7 命令与退出码（真跑）
+
+| # | 命令 | 退出码 | 结果 |
+|---|---|---|---|
+| 1 | `node --check scripts/verify/suites/expert.mjs` | **0** | 语法通过 |
+| 2 | `node scripts/check-verify-scripts.mjs` | **0** | 现役 11 / 待迁移 0 / 作废 3；`expert` 在册 |
+| 3 | `node scripts/verify/suites/expert.mjs --url http://127.0.0.1:3080 --db-path 'C:\Users\Administrator\.dsh\workbench\verify-web.db' --target-profile-dir 'C:\Users\Administrator\.dsh\profiles\web' --evidence-dir "$env:TEMP\p10-suite-evidence"` | **1** | 第一次：30/35（failed 1 / skipped 4）。fail = `AX-E61-a`（**套件自身的形状读错**：只认 `body.entries`，而该端点真实形状是 `{ok,experts,personas,…}` ⇒ 15 位可引用专家被读成 0）。E60 的 skip 原因是**套件自身的门槛写错**：要求 `events > 4`，而宿主建出的会话只有 4 条握手事件 ⇒ 把产品缺陷误报成"没建会话"。两处都已修（§17.3），**不是环境问题** |
+| 4 | 同上（`--evidence-dir "$env:TEMP\p10-suite-evidence4"`）…run 12 | **0** | 修完套件自身缺陷后：`31/35`（failed 0 / skipped 4）。E60 仍 skip：SPA 的 `dsh.sessions.current` 在 300s 整页重载里始终停在旧会话，消息**根本没发进被追踪的那个会话**（`toolCalls:[]` 是误判） |
+| 5 | 同上（run 13） | **0** | 套件崩在 `afterReloadLoop` 变量名残留（`Cannot read properties of undefined (reading 'current')`）⇒ `28/28` 后中断。已修变量名 + 给换会话段加 try/catch 兜底（一条探针不再能打断整套件），并改成「关浏览器 + 冷启动新实例」 |
+| 5b | 同上（**run 14，最终一次**，`--evidence-dir "$env:TEMP\p10-suite-evidence14"`） | **0** | **`{"passed":33,"failed":0,"skipped":2,"total":35}`** —— **AX-E60 与 AX-E60-b 转绿**（真实会话 + 真实工具调用 + 草稿 `contentVersion=1`/`phase=validated` + 确认前正式角色库为空），skip 只剩 `AX-E61` / `AX-E62` |
+| 6 | `pnpm test` | **0** | `tests 1289 / pass 1289 / fail 0 / skipped 0`，`duration_ms ≈ 11998`（含 `pnpm build`，buildId `wb-8181274a3900fe0b`） |
+| 7 | `node scripts/dev-verify.mjs …`（去掉 `--dry-run`） | **未跑** | 见 §17.8 第 3 条：它会 `dev-install` 重装冻结副本 + `restartTarget` 重启 3080，本轮以「已冻结装盘副本 + 单跑套件」取得 AX-E60 真证据，故不做重装/重启 |
+
+**AX 逐条（run 14）**：`AX-E60` pass（会话 `session-8c32e4b8-e9c6-4a41-ad1d-f5a792e143b9`，53 事件 / 30 帧 / 0 解压失败；
+工具调用 `workbench_get_expert_draft` → `workbench_search_knowledge` → `workbench_submit_expert_draft`×3 → `workbench_validate_expert_draft`；
+草稿行 `e7162d58-4af4-4c33-8729-3206d43876a9`，`contentVersion=1`、`phase="validated"`、`provenanceKind="original"`、
+validation `errors[] / warnings[]`）· `AX-E60-b` pass（`request/header` 实测 57 个工具，5 个生成工具逐个在位）·
+`AX-E61-a` pass（catalog 200 / 15 位可引用内置角色 + composer 在位）· `AX-E62-a` pass（`autoSummon.{available:true,enabled:false}`）·
+`AX-E61` / `AX-E62` skip（真实调用预算：本批累计 5 次 / 上限 6，明细见 §17.6 与 P10-handover §4.1）。
+
+**规格偏差（P10 最终口径）**：① AX-E60 的 prompt 不是插件自己排进去的那条，而是逐字复刻后经**真实 composer** 发进**宿主本次真建出的会话**，
+`findings.dispatchPath = composer-fallback`（产品缺陷见 §17.5）；② 换会话用「**关浏览器 + 冷启动新实例**」——
+实测 `?session=` 对 SPA 无效、侧栏列不出"零消息"会话、同一实例整页重载不换会话，**只有全新进程冷启动**
+才会把 `dsh.sessions.current` 解析成最新会话；这是用宿主自己的状态判定，没有伪造任何模型输出；
+③ 只有"JSONL 真出现工具调用 + 草稿行真推进 + 确认前正式库真为空"三条同时成立才 pass，否则 skip + 具体原因。
+
+**行尾（CRLF 陷阱）复核**：`git diff --numstat` 对 `scripts/verify/suites/expert.mjs` 是 **+1054 −114**（不是整文件翻倍），
+文件内 **CR 字节数 = 0**（LF-only，与 `git show HEAD:` 版本同口径）。
+
+### 17.8 未验证项与后续义务
+
+1. **未跑**：`AX-E61` / `AX-E62` 的模型后半（预算已用尽：各至少还要 3 次 / 2 次真实调用）。
+2. **未跑**：`node scripts/dev-verify.mjs`（去掉 `--dry-run`）—— 它会重装冻结副本并重启 3080 实例；
+   本批以「已冻结装盘副本（`_local-build/dsh-personal-workbench-dev-a327aa8-20261005-212618.tgz`）+ 单跑套件」
+   取得 AX-E60 真证据，故不做重装/重启。套件在真实链里的 `required` 语义（带未登记 skip 即不通过）未在链上复核，
+   且**没有**动 `ALLOWED_REQUIRED_SKIPS`。
+3. **产品缺陷未修**（`res.draft.id` → `draftId`，§17.5）：修掉后 `dispatchPath` 应变成 `plugin-queued`，
+   套件里两条通道都保留着，届时不必改判据。
+4. **未定论**：宿主"什么时候把新会话收录进会话列表"的节奏（本轮证据：冷启动会认领最新会话；
+   run 14 在建会话后 ~1 分钟内即认领；更早几轮的滞后十几分钟未深挖）。
+5. 每次真跑都会在目标库留 pending 专家草稿：套件 `finally` 的兜底 abandon 是**必要安全网**
+   （run 14 实测 `收尾兜底放弃遗留草稿 e7162d58-…：HTTP 200`），别删。
+
+## 18. P11 施工记录（产品缺陷修复 + 派发判据补强，真机复验通过）
+
+P10 §17.5 只**记录**了产品缺陷（边界内不许改产品代码）。P11 由用户拍板修掉它，并把「提示词是产品发的」
+从 AX-E60 里拆出来单独判。完整交接见 `P11-handover.md`。
+
+### 18.1 缺陷与修复（P0 级：入口点了没反应）
+
+- 根因（逐行）：`ExpertDraftView` 只有 `draftId` 没有 `id`（`src/experts/drafts.ts:156-168`，生产者
+  `expertDraftView()` 见 `:1388-1403`）；路由把草稿嵌在 `draft` 下（`src/api/routes/experts.ts:84`，
+  `preview`/`validate` 同形状 `:123-127`/`:134-139`）；客户端修前读 `res.draft` 后判
+  `typeof draft.id !== 'string'` 并 `fail('generation-start-failed', …)` 提前 return
+  （`src/client/hooks/useWorkbenchExperts.ts:767-775`）⇒ **第 9 步 `session.prompt([...], 'queue')` 永不执行**。
+  同一根因还让 `validate` / `readLatestDraft` 读不出 payload 与 `contentVersion`（AX-E55 的 CAS 退化）。
+- 修复（唯一产品代码改动，`src/client/hooks/useWorkbenchExperts.ts`）：新增
+  `normalizeExpertDraftResponse(raw: unknown): DraftView | null`，两种形状都认（已带 `id`+`payload` 原样放行；
+  否则按 `draftId` 平铺形状包成 `DraftView`；都不是返回 `null` 不猜），三处读取统一走它。
+- 为什么 1289 条单测没抓到：`test/expertClientFlow.test.mjs` 的 `makeDraft()` 手搓的是通用工作台草稿（带 `id`），
+  假响应与客户端自洽 ⇒ **真服务端形状从未被覆盖**（教训已沉淀进工作台知识库）。
+- 测试改造：fixture 改为 `makeServerExpertDraftView()` = 产品真实的 `expertDraftView({…})` 产出；
+  AX-E53/E54/E55 全部换真实平铺形状；新增 3 条 P11 用例（形状判定 / 平铺必须走到 `promptSent` / 版本冲突仍认得出）。
+  用例 38 → 41。规格更正：`方案-v0.3.md` §4.1 三处响应形状 + §8 签名统一成 `ExpertDraftView`；
+  另在 `acceptance.md` / `implementation-plan.md` 把「real LLM」措辞改成「真实会话通道」。
+
+### 18.2 命令与退出码（主会话亲自跑，非只读子代理报告）
+
+| 命令 | 退出码 | 结果 |
+|---|---|---|
+| `pnpm typecheck` | 0 | 干净 |
+| `pnpm build` | 0 | client bundle `597.78 kB / gzip 177.41 kB` |
+| `node --test test/expertClientFlow.test.mjs` | 0 | 41 pass / 0 fail |
+| `pnpm test` | 0 | **tests 1292 / pass 1292 / fail 0**（P10 末 1289 + 3） |
+| `node --check scripts/verify/suites/expert.mjs` | 0 | 语法 |
+| `node scripts/check-verify-scripts.mjs` | 0 | 现役 11 / 待迁移 0（必需 0）/ 作废 3 / 本地 0 / 嫌疑 0 |
+| 单跑 `expert.mjs`（3080，见 18.3） | **0** | `{"passed":34,"failed":0,"skipped":2,"total":36}` |
+
+### 18.3 独立实例真机验收（3080，冻结副本已含修复）
+
+- 证据目录 `test-results/workbench-verify/20261006-002551-p11/`（`run.log`、`suite-expert.json`、
+  `suite-expert/{summary,expert-readings}.json`、`model-e60-{dispatch,draft-row,first-user-message,session}.json`、
+  9 张截图）；目标 health `1.16.5 / wb-8181274a3900fe0b / schema 19`；包 = `current.txt` →
+  `dsh-personal-workbench-dev-7dc60f9-20261006-001045.tgz`（2 649 920 字节 / 311 条目）。
+- **修复确实在跑的包里**：装盘副本 `…\profiles\web\node_modules\@dely0\dsh-personal-workbench\lib\client.js`
+  （597 782 字节，2026/10/6 0:10:50）里 generation-start 处是压缩后的
+  `let n=ei((await e.call('/api/workbench/experts/generation-start',{…}))?.draft); if(n===null)return r('generation-start-failed',…)`，
+  修前的 `typeof draft.id !== 'string'` 已不在（`ei` = 被压缩的 `normalizeExpertDraftResponse`）。
+- **派发判据**：`dispatchPath = "plugin-queued"`、`dispatchWaitMs = 0`、`suiteModelCallsAtDetection = 0`、
+  `manualResendBySuite = false`；第一条 user 消息 `seq 9 / chars 4280 / sha256 B7CA4460…35CA1`，
+  正文即插件构造的 prompt（含「## 方法论（全文）」「## 用户的请求」「## 交付方式」）。
+- **生成会话**：`session-095ffd03-88f3-4495-b7e6-3446767f47c9`（`cwd` = 仓库根、`parentSession` 空、
+  `delegationDepth = 0`；49 事件 / 0 解压失败 / 4 条 `user/message`），模型 `deepseek-official/deepseek-flash`，
+  工具序列 `workbench_get_expert_draft` → `workbench_search_knowledge` → `workbench_submit_expert_draft`×3 →
+  `workbench_validate_expert_draft`。
+- **目标库草稿行** `17121124-fb7d-44a3-a461-6bf7d9ee7dc1`：`session_id` = 上面那个会话、`status_code=pending`、
+  `content_version=1`、`phase="validated"`、`expert_id=generated/7d4b7460-…`、`persona_chars=653`、
+  `provenance_kind="original"`、validation `manifestHash 6b1bae6f…37e5`、`errors[]`/`warnings[]`；
+  **确认前正式角色库 `rootExists:false`**。
+- 包内容检查（AX-E59 全绿）：311 条目 / 版本 1.16.5 / 方法论在 / `lib/experts/**` 24 / `lib/**` 280 /
+  personas 15 / 三份许可齐；不该有的全为 0；扫 300 个文本条目，本机路径命中 `[]`。
+
+### 18.4 反向注入（修复必要性，第 8 处独立证据）
+
+`useWorkbenchExperts.ts` 里 `const draftId = typeof record.draftId === 'string' ? record.draftId.trim() : ''`
+改成 `const draftId = ''` ⇒ `pnpm build` **0**（编译不报错）但单测 **30 pass / 11 fail**
+（3 条 P11 + AX-E52×2 + AX-E53×3 + AX-E54×1 + AX-E55×2）；还原后 build 0 / 41 pass，
+文件 sha256 `41ECA9CFAE28882DF4DF57C61CA71DB17336794B0E08DA6424236B7ABDA05A88` **逐字节一致**。
+
+### 18.5 AX 对账（本次单跑）
+
+AX-E52 / E54 / E55 / E56 / E57 / E58 / E59 / E60（含新增的 `AX-E60 ⭐` 产品派发）/ AX-E60-b / AX-E61-a / AX-E62-a
+**全部 pass**；仅 `AX-E61 ⭐ 模型链路` 与 `AX-E62 ⭐ 模型链路` 记 **skip（预算）**，`failedChecks` 为空。
+
+### 18.6 未验证项（如实标注，不算通过）
+
+1. `AX-E61` / `AX-E62` 的模型后半（真实调用预算）。
+2. 全链 `node scripts/dev-verify.mjs`（去 `--dry-run`）**未重跑**（会重装冻结副本 + 重启 3080，需用户明确同意）；
+   套件在链里的 `required` 语义未在链上复核，**没有**动 `ALLOWED_REQUIRED_SKIPS`。
+3. **产品级反向注入未做**（要重装 + 重启才能把修前的包重新上机）；敏感度证据 = 18.4 的单测注入 + 新检查判据
+   `dispatchPath === 'plugin-queued'`（一行纯函数，两个取值分别对应 P10 的 `composer-fallback` 与本次的 `plugin-queued`）。
+4. 卸载/重装/升级路径、macOS/Linux、多生成会话并发时序未测。
+5. 过程事实：本批先委派子代理 `1585ce8c-ee00-499b-9f12-320ae86bcbc4`，它做完 `build → pack → install → 重启 3080`
+   与套件改动后在跑套件时挂掉、无收尾消息；主会话接手现场核查 + 亲自跑真机验收 + 写文档。
+
