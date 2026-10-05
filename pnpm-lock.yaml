@@ -11,6 +11,9 @@ importers:
       react:
         specifier: ^18.3.1
         version: 18.3.1
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.4
@@ -660,6 +663,11 @@ packages:
     resolution: {integrity: sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==}
     engines: {node: '>= 0.8'}
 
+  yaml@2.9.1:
+    resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
   zod@4.6.5:
     resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
 
@@ -1182,5 +1190,7 @@ snapshots:
   undici-types@7.18.2: {}
 
   vary@1.1.2: {}
+
+  yaml@2.9.1: {}
 
   zod@4.6.5: {}

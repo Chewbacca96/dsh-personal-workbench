@@ -36,6 +36,8 @@
     "src/shared/expert.ts",
     "src/experts/paths.ts",
     "src/experts/provenance.ts",
+    "src/experts/skill-package.ts",
+    "src/experts/drafts.ts",
     "src/db/repo/experts.ts",
     "src/db/repo/persona-bindings.ts",
     "src/client/listPresentation.ts",

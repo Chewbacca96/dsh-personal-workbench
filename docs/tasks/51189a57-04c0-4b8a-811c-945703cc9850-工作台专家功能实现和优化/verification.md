@@ -116,7 +116,8 @@ console.log(JSON.stringify(counts));
 |---|---|---|
 | P0 目标执行环境重新核对 | ✅ 2026-10-05 已执行 | 见 §7；HEAD 50d85b9、SDK 0.2.0-rc.2、依赖的公开接口全部存在。原状态“未执行（本轮只核对了本机设计环境）”保留于此 |
 | P1 类型/设置/字典种子/路径与来源校验 | ✅ 2026-10-05 已执行 | 见 §8；typecheck 0 / build 0 / expert 三件套 43 pass / 回归 80 pass，AX-E01–E06 全 pass。原状态“未实现”保留于此 |
-| P2–P5 生成与安装主链 | 未实现 | 无产品运行结果 |
+| P2 草稿提交/分文件暂存/整包校验 | ✅ 2026-10-05 已执行 | 见 §9；typecheck 0 / build 0 / P2 三件套 77 pass / 回归 105 pass，AX-E07–E14 全 pass。原状态“未实现”保留于此 |
+| P3–P5 生成与安装主链 | 未实现 | 无产品运行结果 |
 | P6–P7 专家调用主链 | 未实现 | 无产品运行结果 |
 | P8 客户端界面 | 未实现 | 无浏览器结果 |
 | P9 包/真实 SDK/真实 LLM | 未执行 | 不以 fake provider 代替 |
@@ -228,4 +229,53 @@ dry-run 通过、目标不等于当前实例且任务已有测试实例授权后
 
 - 仓库内**另一个会话**正在跑 `release-preflight.mjs` 与 `scripts/repro/probe-*-mutations.mjs`：会删 `lib/`、改源文件再还原 → `pnpm build` 与 `node --test` 必须写在同一条命令里。
 - 检出并还原了一处**探针遗留变异**：`probe-listview-mutations.mjs` 被中途终止后，`src/client/components/KnowledgeList.tsx` 的 `knowledgeFilterActive` 留在 `return false`（正是该探针第 12 个变异）；主会话用 `git checkout` 还原，该文件不属于本批改动。
+
+## 9. P2 施工记录（2026-10-05 执行）
+
+**批次**：P2 草稿提交、分文件暂存与整包校验。完整交接（导出签名、错误码清单、接线义务、未验证项）见 [P2-handover.md](P2-handover.md)。
+
+### 9.1 命令与退出码（主会话独立复跑）
+
+| 命令 | 退出码 | 实际结果 |
+|---|---|---|
+| `pnpm typecheck` | 0 | 干净 |
+| `pnpm build` | 0 | `buildId wb-13288ff8e36523c8`，190 个输入文件 |
+| `node --test --test-concurrency=1 test/expertDrafts.test.mjs test/expertSkillPackage.test.mjs test/personaParse.test.mjs` | 0 | `tests 77 / pass 77 / fail 0` |
+| `node --test --test-concurrency=1`（expertContracts/expertPaths/expertProvenance/personaLibrary/personaBinding/capabilities） | 0 | `tests 105 / pass 105 / fail 0` |
+| `node --test --test-concurrency=1 test/db.test.mjs` | 1 | `tests 9 / pass 8 / fail 1`：仅 `removeTempDir` EPERM（`test/db.test.mjs:35`），仓库既有 Windows 清理期问题，非本批回归 |
+
+`SUMMARY typecheck=0 build=0 p2=0 regression=0 dbtest=1`。
+
+### 9.2 AX-E07–E14
+
+| 断言 | 结论 | 证据 |
+|---|---|---|
+| AX-E07（正文 20000/20001 UTF-16 单元；CRLF/BOM/emoji 计数与现有 parser 一致） | ✅ pass | `test/expertDrafts.test.mjs`（2 条） |
+| AX-E08（白名单外 frontmatter/空正文/超长名称 → 提交失败且旧草稿不损坏，不放宽 parser） | ✅ pass | 同上（2 条） |
+| AX-E09（translated 无来源、merged 单来源、MIT 缺版权/全文；commit 缺失只警告） | ✅ pass | 同上（3 条） |
+| AX-E10（含 CRLF 与原版权的许可文本按输入字节保存） | ✅ pass | 同上 |
+| AX-E11（他会话草稿、无真实 session、伪造参数 session 一律拒绝） | ✅ pass | 同上（3 条） |
+| AX-E12（单件/总量/数量/skill 数越界；不留超限索引） | ✅ pass | `test/expertDrafts.test.mjs`（4 条）+ `test/expertSkillPackage.test.mjs`（多条） |
+| AX-E13（validate 后 stage 改文件 → version 增、validation 清空、旧 hash 失效） | ✅ pass | 同上（2 条 + 步骤 5 的 `staged-file-changed`） |
+| AX-E14（坏 YAML/重复 key/缺 name·description/目录名不符/legacy 键/字符串 false/metadata 保留） | ✅ pass | `test/expertSkillPackage.test.mjs`（10 条） |
+
+### 9.3 交付物与接线义务
+
+- 新增 `src/experts/skill-package.ts`、`src/experts/drafts.ts` + 两个测试；`package.json`/`pnpm-lock.yaml` 增加普通运行时依赖 `yaml 2.9.1`；`tsconfig.build.json` 增两条 include。P1 文件零改动。
+- **P5 接线义务（复核中发现，必须遵守）**：①五个工具的 `sessionId` 必须来自执行上下文 `exec.agent.session.id`，**不得作为工具参数暴露**；②`validateExpertDraft` 的 HTTP 路径靠"不传 `sessionId` 键"区分，工具路径必须传真实会话 id；③`context.failpoint` 只给测试，生产入口不得暴露；④`context.skills` 的生产注入点在 P4/P5 补。
+- **P3 注意**：`manifestHash` 来自 DB 索引（已与磁盘核对），confirm 必须重读磁盘自行复算后比对，不能只信库里的值。
+
+### 9.4 未验证项（如实标注）
+
+- 中断/回滚用注入 `failpoint` 模拟，不是真杀进程；跨进程恢复属 P3（install journal + `.install.lock`）。
+- 未接真实 skills 服务/DSH runtime；reuse 判定只对 fake registry 验过。
+- 未跑全仓 75 个测试文件（只跑 P2 三个 + 回归六个）；未用 `--frozen-lockfile` 复验锁文件。
+- `~/.dsh/workbench/personas`、`~/.dsh/workbench/skills` **仍不存在**：本批未写任何正式目录，无可安装专家。
+
+### 9.5 规格偏差与过程事实
+
+- 偏差 1：`ExpertOperationFailure.code` 放宽为 `ExpertErrorCode | PersonaDiagnosticCode`（仅人格正文失败路径，AX-E07/E08 要求原码透出）。
+- 偏差 2：`rootForArea()`（P1）只认 `'persona' | 'skill'`，`drafts.ts` 内部用 `areaRoot()` 显式映射，未改 P1。
+- 偏差 3：skill 包单件超限只报 `file-too-large`，不多报 `skill-package-invalid`。
+- 过程事实：实施子代理在写完两个源文件后中断（无收尾消息，`pnpm typecheck` 退出码 2：`drafts.ts:64` 模块导入错、失败对象 `code` 类型过宽、`:1183` area 类型不匹配）；主会话诊断后发回修复清单，补测并全绿。本批是**跨轮续作**，不是一次成功，如实记录。
 - 仓库本地 `core.autocrlf` 被外部改成 `false`，而 HEAD blob 全为 LF、工作树多为 CRLF → 直接把改动 `git add` 会产生整文件 CRLF churn；本批文件已统一成 LF 后再提交（`git diff --stat` 只显示真实改动 +51/−3）。
