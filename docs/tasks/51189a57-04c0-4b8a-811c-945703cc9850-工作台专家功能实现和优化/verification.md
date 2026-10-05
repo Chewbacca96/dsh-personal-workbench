@@ -122,7 +122,7 @@ console.log(JSON.stringify(counts));
 | P5 生成会话与调用接线 | ✅ 2026-10-05 已执行 | 见 §12；typecheck 0 / build 0 / P5 四件套 43 pass / 专家域回归 45 pass / 全仓 1195 tests 1194 pass 1 fail（唯一失败是既有 db.test.mjs 清理期 EPERM）、AX-E31–E35 与 AX-E50 全 pass；另有真实 HTTP 全链独立证据 38/38 与 `pnpm pack` 产物核验。原状态“未实现”保留于此 |
 | P6 专家调用主链（请求 / 子代理按需人格 / 回传与释放） | ✅ 2026-10-05 已执行 | 见 §13；typecheck 0 / build 0 / P6 三件套 33 pass / 专家域回归 80 pass，AX-E36–E44、E48 全 pass，AX-E49 通过但其中"真实 skills 服务根因"标未验证；主会话另做并发位反向注入（AX-E44 变红）。原状态"未实现"保留于此 |
 | P7 手动入口（`@` / `/expert` / `POST manual-requests`） | ✅ 2026-10-05 已执行 | 见 §14；typecheck 0 / build 0 / P7 三件套 40 pass / 专家域回归 146 pass / 全仓 1244 tests 1243 pass 1 fail（唯一失败是既有 db.test.mjs 清理期 EPERM，单跑亦失败）、AX-E45–E47 与 E51 全 pass；主会话另做 disposed 守卫反向注入（2 条断言变红，还原后逐字节一致）。真实宿主里的 `@` 菜单点击与 serialize 抛错时宿主 UI 行为**未验证**（留 P8/集成验收）。原状态"未实现"保留于此 |
-| P8 客户端界面 | 未实现 | 无浏览器结果 |
+| P8 客户端界面（生成入口 / 专家管理 / 专家草稿横幅） | ✅ 2026-10-05 已执行 | 见 §15；typecheck 0 / build 0 / P8 四件套 56 pass / 全仓 1282 tests 1281 pass 1 fail（唯一失败是既有 db.test.mjs 清理期 EPERM）、AX-E52–E58 全 pass；主会话另做 picker 第二道闸门反向注入（AX-E56 变红，还原后逐字节一致）。**无浏览器结果**：DOM 渲染、点击、真实宿主 `sessions.create`、真实 LLM 与真实安装落地全部未验（留 P9）。原状态"未实现"保留于此 |
 | P9 包/真实 SDK/真实 LLM | 未执行 | 不以 fake provider 代替 |
 
 每批追加日期、git/build ID、命令、退出码、AX-E 编号、pass/fail/unverified/blocked 与证据路径。不要改写此前失败记录来伪装连续通过。
@@ -180,7 +180,7 @@ dry-run 通过、目标不等于当前实例且任务已有测试实例授权后
 ### 7.3 本批新增的产品事实与约束
 
 - **本项目 devDependencies 里没有** `dsh-skill` / `dsh-subagent` / `dsh-scope` / 客户端 UI 包（只有 cordis、dsh-commands、dsh-host-webserver、dsh-llm、dsh-system-prompt、dsh-tools）。因此 P4/P6/P7 的适配层**只能按结构化 Probe 接口写形状探测**，不能 `import` 宿主 runtime；`@deepseek-ai/dsh-scope` 的开发依赖按 P4 计划再加。
-- 客户端 `sessions.create` 与宿主 controller 的 `create` 是两层同名接口，形状一致（`workspaceId` / `cwd` / `sessionId` 全可选），P8 的 `WorkbenchRuntime.sessions` 可选方法形状按此声明。
+- 客户端 `sessions.create` 与宿主 controller 的 `create` 是两层同名接口，形状一致（`workspaceId` / `cwd` / `sessionId` 全可选），P8 的 `WorkbenchRuntime.sessions` 可选方法形状按此声明（**P8 已按此落地**：`src/client/viewTypes.ts:217` 的 `create?(input?: {...}): Promise<string>`，见 §15）。
 
 ### 7.4 未验证项（如实标注，不填通过）
 
@@ -531,3 +531,44 @@ dry-run 通过、目标不等于当前实例且任务已有测试实例授权后
 ### 14.6 未验证项（如实标注，不填通过）
 
 8 条见 `P7-handover.md` §8，核心是：**真实宿主未跑**（未起 19387、未点 `@` 菜单，源并列/引用胶囊/`onPick` 后的 ref 呈现只对着假 `host` 验过）；**`codec.serialize` 抛错时宿主的 UI 行为未验证**（"保留输入并阻止发送"属宿主契约）；**跨会话复制的拒绝未端到端验证**（`manual-request-session-mismatch` 属 P6/服务端）；**真实 `agent.steer` 与 `CommandInvocation.agent` 真实形状未跑**；**`pnpm test` 全量脚本未跑**（用等价 `node --test test/*.test.mjs`）；**真实 provider / 真 `SubagentRuntime` / 真 LLM 全部未跑**（同 P6）；**macOS/Linux 未测**。
+
+---
+
+## 15. P8 施工记录（2026-10-05 执行）
+
+### 15.1 命令与退出码（主会话独立复跑，同一条命令链）
+
+| 命令 | 退出码 | 计数 / 结果 |
+|---|---|---|
+| `pnpm typecheck` | 0 | `tsc --noEmit`（`tsconfig.json` 的 `include: ["src"]` + `strict: true`，**确实覆盖 `src/client/**`**） |
+| `pnpm build` | 0 | buildId `wb-d130ed707d64a654`（206 个输入文件）；`lib\client.js` 597.32 kB / gzip 177.29 kB |
+| `node --test test/expertClientFlow.test.mjs test/clientInvariants.test.mjs test/capabilities.test.mjs test/draftBannerSessionJump.test.mjs` | 0 | `tests 56 / pass 56 / fail 0` |
+| `node --test test/*.test.mjs`（全仓） | 1 | `tests 1282 / pass 1281 / fail 1`（duration 约 12 s） |
+
+全仓唯一失败与 P5/P6/P7 基线同源、非本批引入：`test/db.test.mjs` 的 "db migrations, dictionaries and task tree"（临时目录清理期 `EPERM`）。计数核对：P7 基线 1244 + 本批新增 38（`test/expertClientFlow.test.mjs` 全部用例）= **1282** ✓。子代理首轮曾报"全仓连跑第二次会多出 4 条假失败"（AX-E48 / AX-R04 / draft defer-resume-abandon API / PATCH `/tasks/:id`），主会话复跑时未复现；那 4 个文件本批一个未碰。
+
+### 15.2 AX-E52–E58
+
+逐条证据（用例名与行号，主会话逐条打开核对过）见 `P8-handover.md` §6。结论：**AX-E52（4 条）、AX-E53（6 条）、AX-E54（6 条）、AX-E55（3 条）、AX-E56（5 条）、AX-E57（4 条）、AX-E58（10 条）全 ✅**。其中"不复用 blank 会话"（`:258` 断言 `sessions.create` 新身份 + `connectWorkspace` 调用数 = 0）、"确认 body 恰好两字段且等于所见版本"（`:505`）、"版本冲突后没有第二次确认"（`:593`）、"安装成功后重读目录"（`:649`）、"required 缺失行可见但选择器不可选"（`:710`）、"`WorkbenchApp` 体内零 `useState`/零网络/零定时器"（`:886`）都各有会失败的断言守着（见 §15.4 的 6 处反向注入）。
+
+### 15.3 交付物
+
+新增 `src/client/hooks/useWorkbenchExperts.ts`（1510 行）、`src/client/components/ExpertCreateModal.tsx`（154 行）、`src/client/components/ExpertDraftBody.tsx`（253 行）、`test/expertClientFlow.test.mjs`（1018 行，38 条）；修改 `src/client/viewTypes.ts`（`+15 −0`，`sessions.create?`）、`src/client/index.tsx`（`+65 −2`，装配 hook + 惰性转发 ref）、`src/client/components/SettingsModal.tsx`（`+57 −3`）、`src/client/components/PersonaAdmin.tsx`（`+244 −143`，改受控组件）、`src/client/components/PersonaPicker.tsx`（`+32 −52`）、`src/client/hooks/useWorkbenchAISessions.ts`（`+21 −0`，绑定前同一份 preflight 守卫）、`src/client/hooks/useWorkbenchDrafts.ts`（`+32 −1`）、`src/client/components/DraftBanner.tsx`（`+189 −22`）、`src/client/app/{assembly.ts,WorkbenchBody.tsx,WorkbenchOverlays.tsx,WorkbenchDialogs.tsx}`（合计 `+44 −4`，纯传参）、`test/personaWiring.test.mjs`（`+17 −4`，写入口径重定向 + 补"受控界面不许留第二份写入口"）、`tsconfig.build.json`（`+1 −0`）。18 个文件全部 CR=0、无 BOM、以 LF 结尾（逐字节统计）。客户端 `inject` 5 项与顶层 `inject` 4 项**逐字未变**；`package.json` / `pnpm-lock.yaml` / `src/client/styles.ts` / `SCHEMA_VERSION` / 迁移 / `src/experts/**` 未动。
+
+### 15.4 独立证据（主会话亲自执行）
+
+- **反向注入 6 处**（5 处子代理 + 1 处主会话自选，全部真红、还原后 SHA256 逐字节一致）：① 删 busy 守卫 → 37/1（AX-E52）；② `manifestHash` 换常量 → 37/1（AX-E54）；③ `create` 改复用 blank 会话 → 32/6（AX-E52 + 5 条 AX-E53）；④ auto 保存失败不回滚 → 37/1（AX-E57）；⑤ 版本冲突后自动确认新版本 → 37/1（AX-E55）；⑥ **主会话自选**：`src/client/hooks/useWorkbenchExperts.ts:579` 的 picker 第二道闸门改成 `return true` → `pnpm build` 0 但 `tests 38 / pass 37 / fail 1`（AX-E56「required 缺失的行：选择器不可选」），还原后 `build 0` + `38/38`，sha256 回到 `DEF610758C5882D2556F2744FB07AF5C6383609EDFBA8B9D2F757BABD044F6DD`。
+- **diff 通读 + 逐条核对 38 个用例锚点**：14 个已跟踪文件 diff 全读，`test/expertClientFlow.test.mjs` 的 38 个行号逐条打开核对（每一行确实是所述行为的用例开头）。**未发现功能缺陷；本批没有修复轮，主会话未改动任何一行源码**。
+- **真实宿主契约核对**：在 `C:\Users\Administrator\.dsh\profiles\node_modules\@deepseek-ai\` 下读到 `ISessions.create(opts?: { workspaceId?; cwd?; sessionId? }): Promise<SessionId>`、失败抛 `SessionCreateError`、`SessionSummary.blank`、`uiWorkspace.openSession(target)` 均真实存在，与 `viewTypes.ts` 注释所述一致。
+
+### 15.5 规格偏差、复核与修复
+
+11 条逐条列在 `P8-handover.md` §7。前 10 条为施工方自报（确认走既有 `POST /drafts/:id/confirm` 而非计划里的 `/experts/.../confirm`；`api()` 不暴露状态码 ⇒ 409 靠重读草稿比对版本；真实 preflight 无 `reason`/`code`；`sessions.create` 按真实 d.ts 声明为可选能力、缺能力不静默降级；工作区必须取带 id 的宿主快照；白名单外 4 个装配管道文件 + 1 个既有测试；`matchWorkspaceForCwd` 改最长前缀；"真值未定时禁用确认"标判断；"全仓 LF"任务书与实况不符）。
+
+**第 11 条是主会话复核时新识别的**：设置页专家列表**不再有分组章节标题**——HEAD 的 `PersonaAdmin.tsx` 用 `groupPersonas(personaPickerList(...))` 渲染分组章节与计数（2026-10-01 用户反馈"层级不明显"后的设计），P8 版改成扁平行（行内显示 `来源｜分组｜登记来源`，另加状态标签与"来源与技能"折叠详情），分组顺序也不再受控。依据 `方案-v0.3.md:785` 只要求"列表展示名称、简介、分组、三级来源、状态、来源方式"，未要求章节，**故按规格不算偏差**；`PersonaPicker` 的分组章节仍保留（`personaPicker.ts:174`）。这是一次相对 HEAD 的可见布局变化，且本批无浏览器验证 ⇒ P9 真机视觉核对项（`P8-handover.md` §9-9）。
+
+**一处观察，未改**：`src/client/index.tsx:711` 的 `if (sessionId === null) return ''` 在 `currentSessionIdOf(runtime): string` 下是恒假分支（`strict: true` 下 TS 也未报错，下一行 `?? ''` 已覆盖空串）；行为无害，按"只接线不改既有语义"未动它。
+
+### 15.6 未验证项（如实标注，不填通过）
+
+8 条见 `P8-handover.md` §8，核心是：**无真浏览器/GUI**（DOM 渲染、点击、弹窗视觉、真实 DOM 里的 `data-wb-expert-*` 取值只做源码级唯一性断言）；**无真实宿主**（`sessions.create` / `acquireSession` / `uiWorkspace.openSession` 全用假 runtime，`SessionCreateError` 的真实抛法未跑）；**无真实 LLM**（generation-start / validate / confirm 全用假 HTTP 响应）；**无真实安装落地**（journal / publication / 文件写入 / skill provider 生效属 P5–P6 覆盖）；**未起宿主点 `@` 菜单与 `/expert`**（P7 遗留）；**auto 开关对自主召唤行为的真实影响未验**（只验了值写对与失败回滚）；**未重启实例**；**macOS/Linux 未测**。

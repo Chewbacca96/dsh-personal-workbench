@@ -23,6 +23,7 @@
     "src/client/expertPrompt.ts",
     "src/client/expertInputSource.ts",
     "src/client/personaPicker.ts",
+    "src/client/hooks/useWorkbenchExperts.ts",
     "src/client/buildId.ts",
     "src/client/components/TaskProgress.tsx",
     "src/client/components/PersonaPicker.tsx",

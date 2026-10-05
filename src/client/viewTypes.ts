@@ -200,6 +200,21 @@ export interface WorkbenchRuntime {
     list: { getSnapshot(): DshSessionListState }
     binding(id: string): DshSessionBinding | undefined
     /**
+     * 新建一个**独立会话**，返回**新会话的 id**（P8 生成入口的入口能力）。
+     *
+     * 形状逐字来自真实宿主注入面（DSH 0.2.0-rc.2，
+     * `@deepseek-ai/dsh-api-session-controller` 的 `ISessions.create` 与 `ClientSessions.create`）：
+     * `create(opts?: { workspaceId?: WorkspaceId; cwd?: string; sessionId?: SessionId }): Promise<SessionId>`
+     * —— 返回的是 **session id**（不是对象、不是 `{ ok, value }`）；
+     * 失败**抛** `SessionCreateError`（`name === 'SessionCreateError'`，带 `rpcError` 与 `requestedSessionId`）。
+     *
+     * ⚠️ 生成入口**只传 `{ workspaceId }`**：不传 `sessionId`（那是"复用既有会话 id"的口子，
+     * 传了就不是新身份了），也不读会话列表猜"当前/最后一条" —— AX-E52 防的正是这件事。
+     * 旧宿主没有这个方法时，生成入口报 `create-unavailable`（缺能力明说），
+     * **不降级成"复用当前会话"**（那会让用户以为生成了一个独立会话）。
+     */
+    create?(input?: { workspaceId?: string; cwd?: string; sessionId?: string }): Promise<string>
+    /**
      * 0.1.7-rc.2 起 `binding()` **只对"已被 retain 的会话"**返回绑定
      * （旧版是按"在列表里/是当前会话"推导）。用 `create()` 新建出来的会话
      * 谁都没 retain → `binding()` 恒为 undefined → 旧写法直接报「会话绑定未就绪」。

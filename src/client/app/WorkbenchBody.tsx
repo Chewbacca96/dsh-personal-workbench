@@ -124,6 +124,17 @@ export function WorkbenchBody(props: WorkbenchAssembly): JSX.Element {
           onRefreshRecallLog={() => void loadRecallLog()}
           recallSessionOff={recallSessionOff}
           onRecallSessionOffChange={(sessionId, mode) => void recallSessionRestore(sessionId, mode)}
+          /**
+           * 专家域（P8）：整束下发（`useWorkbenchExperts` 的结果 + 待确认专家草稿）。
+           *
+           * 待确认草稿从**草稿域**里筛出来（`allPendingDrafts` 是服务端事实，含被本地
+           * 屏蔽的那些）——「设置 → 角色库」里的"待确认草稿"区要看到全部，
+           * 而不是"当前弹着的那一份"。这是跨域读取，不新增任何状态。
+           */
+          experts={props.experts}
+          pendingExpertDrafts={props.draftsApi.allPendingDrafts.filter((draft) => draft.kindCode === 'expert')}
+          onOpenExpertDraft={(draft) => { void props.draftsApi.actions.resumePendingDraft(draft) }}
+          onEditExpertDraft={(draft) => props.experts.actions.openGenerationSession(draft)}
           onClose={() => setShowSettings(false)}
         />
       )}

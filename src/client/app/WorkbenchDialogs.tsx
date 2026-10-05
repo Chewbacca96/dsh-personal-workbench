@@ -237,8 +237,14 @@ export function WorkbenchDialogs(props: WorkbenchAssembly): JSX.Element {
             value={quickPersona}
             onChange={setQuickPersona}
             disabled={busy}
-            onError={setError}
-            onNotice={(message) => pushToast(message, 'success')}
+            /**
+             * P8 §9.2：与提示词弹窗**同一份目录数据**（`useWorkbenchExperts` 拥有），
+             * 本组件不再自持列表、不再自己拉 `/personas`。
+             */
+            personas={props.experts.pickerPersonas}
+            loading={props.experts.catalogLoading}
+            problem={props.experts.catalogError?.message ?? ''}
+            onRetry={() => void props.experts.actions.refreshCatalog()}
           />
 
           {/* ---------------- 工作区选择已上移到技能选择之前（2026-10-01） ----------------

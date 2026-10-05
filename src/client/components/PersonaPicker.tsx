@@ -1,5 +1,5 @@
 /**
- * 角色选择器（D13-B / requirements §6.3、AX-R07）。
+ * 角色选择器（D13-B / requirements §6.3、AX-R07；P8 §9.2 改数据源）。
  *
  * ## 一个组件、两个入口
  *
@@ -9,26 +9,24 @@
  *
  * ## 形态对齐「加载 Skill」（2026-10-01 按用户带截图的反馈重做）
  *
- * 用户原话："把这个角色页面功能做的和它下面的加载 Skill 页面一样就行。" 具体三件事：
+ * 1. **搜索框常驻**；2. **全部角色铺在同一页**靠滚动看（没有「更多角色」按钮）；
+ * 3. **收藏 / 停用搬去设置页**，选择器只留「只看收藏」筛选。
  *
- * 1. **搜索框常驻**（旧形态是点「更多角色」才出现，用户截图证明了这一点）；
- * 2. **全部角色就铺在同一页**靠滚动看，**删掉「更多角色」按钮**与那段长提示；
- * 3. **收藏 / 停用这两个动作搬去设置页** —— 它们是配置，不是选择。
- *    选择器里只留一个「只看收藏」**筛选**按钮（用户要求：角色多的时候快速收敛）。
+ * ## 状态所有权（P8 改）
  *
- * ## 状态所有权
+ * 旧实现自己 `GET /api/workbench/personas` 再自持一份列表 —— P8 起**不再自己拉**：
+ * 角色来源改为**专家目录**（`/experts/catalog` 的 `personas`，服务端只放 `usable` 的），
+ * 由 `useWorkbenchExperts` 拥有并作为 `personas` prop 传进来（方案 §9.2 与 §12.3）。
  *
- * 角色列表的**唯一权威源是服务端**（`/personas` 摘要）。本组件不缓存第二份，
- * 也不写设置 —— 收藏/停用由「设置 → 角色库（专家人格）」写，写完重读。
+ * 这么做不是为了省一次请求，而是为了**只有一份"哪些角色能用"的判定**：
+ * required 依赖技能缺失的角色在目录里是 `dependency-unavailable`，客户端第二道闸门由
+ * `expertPickerPersonas()` 统一剔除；选择器若自己再读旧接口，就会出现
+ * "管理页说不可用、选择器还能选"的分叉（AX-E56 要防的正是这个）。
  *
- * ## 不遮挡技能栏
- *
- * 整块是普通文档流里的一个 `<div>`（不用绝对定位、不加遮罩），滚动区是自己的
- * `max-height + overflow:auto`，所以它下面那块技能选择器仍在文档流里正常展开。
+ * 本组件保留的本地状态只有"搜索词"与"只看收藏"两个纯 UI 过滤条件。
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { PersonaDiagnostic, PersonaSummary } from '../../shared/persona.js'
-import { api } from '../api.js'
+import { useMemo, useState } from 'react'
+import type { PersonaSummary } from '../../shared/persona.js'
 import {
   INHERIT_PERSONA, NO_PERSONA, groupPersonas, personaPickerList,
   personaSelectionFor, personaSelectionLabel, personaSourceLabel,
@@ -40,39 +38,22 @@ export interface PersonaPickerProps {
   value: PersonaSelection
   onChange: (next: PersonaSelection) => void
   disabled?: boolean
-  /** 读列表失败时的可读中文原因（父级负责显示，不静默）。 */
-  onError?: (message: string) => void
-  onNotice?: (message: string) => void
+  /**
+   * 可选角色（**唯一来源**：专家目录里 `usable` 的那些，已过 `expertPickerPersonas()`）。
+   * 手工角色来源未登记也在这里（`provenanceState='unrecorded'` 仍可用）。
+   */
+  personas: readonly PersonaSummary[]
+  /** 目录是否还在读（装配层给 `experts.catalogLoading`）。 */
+  loading?: boolean
+  /** 读目录失败的可读原因（装配层给 `experts.catalogError?.message`）。 */
+  problem?: string
+  /** 重试（装配层给 `experts.actions.refreshCatalog`）。 */
+  onRetry?: () => void
 }
 
-interface PersonaListPayload {
-  ok: boolean
-  personas: PersonaSummary[]
-  diagnostics: PersonaDiagnostic[]
-}
-
-export function PersonaPicker({ value, onChange, disabled = false, onError }: PersonaPickerProps): React.ReactNode {
-  const [personas, setPersonas] = useState<PersonaSummary[]>([])
-  const [loading, setLoading] = useState(true)
-  const [problem, setProblem] = useState('')
+export function PersonaPicker({ value, onChange, disabled = false, personas, loading = false, problem = '', onRetry }: PersonaPickerProps): React.ReactNode {
   const [query, setQuery] = useState('')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
-
-  const load = useCallback(async (): Promise<void> => {
-    setLoading(true)
-    try {
-      const res = await api<PersonaListPayload>('/api/workbench/personas')
-      setPersonas(res.personas ?? [])
-      setProblem('')
-    } catch (error) {
-      /** 拿不到角色库必须**可见**（一个空下拉框会让用户以为"本机没有角色"）。 */
-      setProblem(error instanceof Error ? error.message : String(error))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void load() }, [load])
 
   const favoriteCount = useMemo(() => personas.filter((persona) => persona.favorite).length, [personas])
   const enabledCount = useMemo(() => personas.filter((persona) => persona.enabled).length, [personas])
@@ -99,7 +80,9 @@ export function PersonaPicker({ value, onChange, disabled = false, onError }: Pe
       {problem !== '' && (
         <div className="wb-skill-problem" role="status">
           <span><Icon name="ai" size={13} /> 角色库暂不可用 —— {problem}</span>
-          <button type="button" className="wb-btn" onClick={() => void load()}><Icon name="refresh" size={12} />重试</button>
+          {onRetry !== undefined && (
+            <button type="button" className="wb-btn" onClick={onRetry}><Icon name="refresh" size={12} />重试</button>
+          )}
         </div>
       )}
 
@@ -175,10 +158,6 @@ export function PersonaPicker({ value, onChange, disabled = false, onError }: Pe
               >
                 <span className="wb-persona-name">{persona.emoji === '' ? '' : `${persona.emoji} `}{persona.name}{persona.favorite ? ' ★' : ''}{persona.enabled ? '' : '（已停用）'}</span>
                 <span className="wb-persona-desc">{persona.description === '' ? '（无简介）' : persona.description}</span>
-                {/**
-                  * 行内来源**不再重复分组名**（2026-10-01）：分组名已经在上面那个章节标题里了，
-                  * 同一屏里写两遍是冗余，而且会让行内文字更容易挤成一团（用户抱怨的正是"挤"）。
-                  */}
                 <span className="wb-persona-source">{personaSourceLabel(persona.source)}{persona.mode === '' ? '' : `｜${persona.mode}`}</span>
               </button>
             ))}
@@ -187,8 +166,9 @@ export function PersonaPicker({ value, onChange, disabled = false, onError }: Pe
       </div>
 
       <div className="wb-persona-foot">
-        共 {personas.length} 个角色（当前显示 {visible.length} 个；启用 {enabledCount}{disabledCount > 0 ? ` / 停用 ${disabledCount}` : ''}）
-        · 收藏与停用在「设置 → 角色库」里改 · 角色正文由 AI 按需加载，不写进提示词
+        共 {personas.length} 个可用角色（当前显示 {visible.length} 个；启用 {enabledCount}{disabledCount > 0 ? ` / 停用 ${disabledCount}` : ''}）
+        · 依赖技能缺失的角色不出现在这里（在「设置 → 角色库」里能看到原因）
+        · 收藏与停用在设置里改 · 角色正文由 AI 按需加载，不写进提示词
       </div>
     </div>
   )

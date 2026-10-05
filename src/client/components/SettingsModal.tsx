@@ -8,8 +8,11 @@ import { useMemo, useState, type ReactNode } from 'react'
 import type {
   ReminderBotOption, ReminderChannelStatus, ReminderOptionsView, ReminderPolicyView, WorkbenchSettings,
 } from '../../shared/contracts.js'
+import type { DraftView } from '../../shared/contracts.js'
 import { Modal } from './Modal.js'
 import { PersonaAdmin } from './PersonaAdmin.js'
+import { ExpertCreateModal } from './ExpertCreateModal.js'
+import type { UseWorkbenchExpertsResult } from '../hooks/useWorkbenchExperts.js'
 import { notificationStateText, type NotificationState } from '../notificationCapability.js'
 
 export interface DictionaryLike {
@@ -127,6 +130,19 @@ export interface SettingsModalProps {
   recallSessionOff: string[]
   onRecallSessionOffChange: (sessionId: string, mode: 'on' | 'clear') => void
 
+  /**
+   * **专家域（P8）**：角色库这一页的数据与动作全部来自 `useWorkbenchExperts`
+   * （方案 §12.3：`PersonaAdmin` 不得再维护第二份 catalog）。
+   * 组装层只把 hook 的结果与 actions 透传进来，不在这里包一层。
+   */
+  experts: UseWorkbenchExpertsResult
+  /** 待确认的专家草稿（`allPendingDrafts` 里 `kindCode === 'expert'` 的那些）。 */
+  pendingExpertDrafts: readonly DraftView[]
+  /** 「查看草稿」：把它推到草稿横幅那条路（复用草稿域的投影，不新建第二份）。 */
+  onOpenExpertDraft: (draft: DraftView) => void
+  /** 「继续修改」：打开它的生成会话。 */
+  onEditExpertDraft: (draft: DraftView) => void
+
   onClose: () => void
 }
 
@@ -142,6 +158,7 @@ export function SettingsModal(props: SettingsModalProps): ReactNode {
     dictForm, onDictFormChange, dictEditCode, onDictEditCodeChange, dictError, onDictErrorChange,
     onSaveDictionary, onToggleDictionary, onDeleteDictionary,
     recallLog, onRefreshRecallLog, recallSessionOff, onRecallSessionOffChange,
+    experts, pendingExpertDrafts, onOpenExpertDraft, onEditExpertDraft,
     onClose,
   } = props
 
@@ -232,15 +249,52 @@ export function SettingsModal(props: SettingsModalProps): ReactNode {
                 <div className="wb-notes-body">
                   <p><b>角色 = 一份 .md</b>（`# 名称` + 引用块元信息 + 正文），工具按名称逐字使用。</p>
                   <p><b>三级来源，前者优先：</b>用户库（~/.dsh/workbench/personas）&gt; 外部角色目录 &gt; 内置 15 篇（6 篇通用工作方式 + 9 篇领域岗位）。列表里每行右侧标出它来自哪一级。</p>
-                  <p><b>工作台只读角色来源</b>，从不写入、不复制、不修改你的 .md 文件。</p>
+                  <p><b>内置 / 外部角色只读</b>：工作台不复制、不修改、不覆盖它们；<b>新建专家仅在用户确认后写入用户库</b>（AI 只先暂存成草稿，确认前不落盘）。</p>
                   <p><b>停用</b>的角色仍会列在下表里（否则启用不回来），只是不能在选择器中选中。</p>
                   <p><b>收藏</b>只影响选择器里的「只看收藏」筛选，不改变角色本身的可用性。</p>
                   <p>角色正文与资源由 <code>workbench_load_persona</code> / <code>workbench_read_persona_resource</code> 按需读取，<b>不预先塞进提示词</b>。</p>
-                  <p className="wb-notes-warn">本页的收藏 / 停用是<b>点一下立刻生效</b>（不等「保存设置」）；上面的外部目录属于设置草稿，要按「保存设置」才生效。</p>
+                  <p className="wb-notes-warn">本页的收藏 / 停用与「允许 AI 自主召唤专家」是<b>点一下立刻生效</b>（不等「保存设置」）；上面的外部目录属于设置草稿，要按「保存设置」才生效。</p>
                 </div>
               </details>
 
-              <PersonaAdmin saving={saving} />
+              <PersonaAdmin
+                saving={saving}
+                catalog={experts.catalog}
+                loading={experts.catalogLoading}
+                error={experts.catalogError}
+                autoSummon={experts.autoSummon}
+                personaFlags={experts.personaFlags}
+                pendingExpertDrafts={pendingExpertDrafts}
+                onRefresh={experts.actions.refreshCatalog}
+                onSetAuto={experts.actions.setAutoEnabled}
+                onToggleFavorite={experts.actions.toggleFavorite}
+                onToggleDisabled={experts.actions.toggleDisabled}
+                onCreate={experts.actions.openCreate}
+                onOpenDraft={onOpenExpertDraft}
+                onEditDraft={onEditExpertDraft}
+              />
+
+              {/**
+                * 新建专家弹窗（P8 §5.4）：挂在这里而不是组装层，是因为它由上面工具栏的
+                * 「新建专家」按钮打开，状态归 `useWorkbenchExperts.create` 所有；
+                * `Modal` 走 portal，视觉上不受设置弹窗层级影响。
+                */}
+              <ExpertCreateModal
+                open={experts.create.open}
+                request={experts.create.request}
+                workspaceId={experts.create.workspaceId}
+                workspaceChoices={experts.create.workspaceChoices}
+                busy={experts.create.busy}
+                error={experts.create.error}
+                createAvailable={experts.create.available}
+                generationSessionId={experts.create.generationSessionId}
+                generationDraftId={experts.create.generationDraftId}
+                onChangeRequest={experts.actions.setCreateRequest}
+                onChangeWorkspace={experts.actions.setCreateWorkspace}
+                onStart={() => void experts.actions.startGeneration()}
+                onClose={experts.actions.closeCreate}
+                onOpenSession={experts.actions.openCreateGenerationSession}
+              />
             </section>
           )}
 

@@ -23,6 +23,7 @@ import type { useWorkbenchBusy } from '../hooks/useWorkbenchBusy.js'
 import type { useWorkbenchDirectoryPicker } from '../hooks/useWorkbenchDirectoryPicker.js'
 import type { useWorkbenchDrafts } from '../hooks/useWorkbenchDrafts.js'
 import type { useWorkbenchFeedback } from '../hooks/useWorkbenchFeedback.js'
+import type { useWorkbenchExperts } from '../hooks/useWorkbenchExperts.js'
 import type { useWorkbenchNavigation } from '../hooks/useWorkbenchNavigation.js'
 import type { useWorkbenchQuickIntake } from '../hooks/useWorkbenchQuickIntake.js'
 import type { useWorkbenchReminders } from '../hooks/useWorkbenchReminders.js'
@@ -63,6 +64,14 @@ export interface WorkbenchAssembly {
   ideas: ReturnType<typeof useIdeas>
   /** 反馈域（D17/P5-1）：toast 宿主与三个写口。 */
   feedback: ReturnType<typeof useWorkbenchFeedback>
+  /**
+   * 专家域（P8）：目录 / 生成入口 / 自主召唤开关 / 专家草稿动作的**唯一所有者**。
+   *
+   * 为什么整束下发：角色库界面（`SettingsModal` → `PersonaAdmin`）与草稿横幅
+   * （`DraftBanner` 的专家分支）都要用同一份 catalog；若各自再拉一份，
+   * 就会出现"刚安装完专家，一个界面看得到、另一个看不到"（§12.3 明令禁止重复 catalog state）。
+   */
+  experts: ReturnType<typeof useWorkbenchExperts>
 
   /* ---- 宿主与模块级助手（刻意留在入口的模块作用域，以注入形式下发，避免成环） ---- */
   runtime: WorkbenchRuntime

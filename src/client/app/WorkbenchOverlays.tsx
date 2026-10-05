@@ -50,8 +50,15 @@ export function WorkbenchOverlays(props: WorkbenchAssembly): JSX.Element {
               value={promptPersona}
               onChange={setPromptPersona}
               disabled={busy}
-              onError={setError}
-              onNotice={(message) => pushToast(message, 'success')}
+              /**
+               * P8 §9.2：角色来源改为**专家目录**（`/experts/catalog` 的 `personas`），
+               * 由专家域 hook 拥有（`pickerPersonas` 已经过了客户端第二道闸门：
+               * 依赖技能不可用的角色不进选择器）。选择器自己**不再拉第二份列表**。
+               */
+              personas={props.experts.pickerPersonas}
+              loading={props.experts.catalogLoading}
+              problem={props.experts.catalogError?.message ?? ''}
+              onRetry={() => void props.experts.actions.refreshCatalog()}
             />
             {/**
               * 技能选择器：与角色选择器并列（都走普通文档流）。
@@ -123,6 +130,13 @@ export function WorkbenchOverlays(props: WorkbenchAssembly): JSX.Element {
         onNotice={(message, tone) => pushToast(message, tone)}
         isSessionUsable={(sessionId) => aiSessionUsable(runtime, sessionId)}
         onConfirmed={(outcome) => handleDraftConfirmed(outcome, pendingDraft)}
+        /**
+         * 专家草稿的动作由**专家域**提供（P8 §12.3）：组件不直接调宿主私有 controller，
+         * 也不在草稿横幅里重写一遍"校验/确认带 expectedVersion+manifestHash"的逻辑 ——
+         * 那两件事只有一处实现（`createExpertDraftOps`）。缺这个 prop 时专家横幅
+         * 会显示"校验/确认按钮不可用"，而不是静默按普通草稿确认（那会 400）。
+         */
+        expertActions={{ validate: props.experts.actions.validateDraft, confirm: props.experts.actions.confirmDraft }}
         switchedFrom={draftSwitchedFrom === null ? undefined : { kindCode: dicts.find((d) => d.kind === 'draft_kind' && d.code === draftSwitchedFrom.kindCode)?.name ?? draftSwitchedFrom.kindCode }}
         /**
          * 团队记忆能力：来自 `GET /api/workbench/bootstrap` 的 `memoryAvailable`。

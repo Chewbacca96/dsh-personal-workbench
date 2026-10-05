@@ -314,13 +314,26 @@ test('选择器：搜索常驻、没有「更多角色」按钮、收藏/停用�
 })
 
 test('设置页承接收藏/停用：唯一写入口径仍是 personaFlagPatch，且写前现读服务端现值', () => {
+  /**
+   * P8 起：角色库界面（`PersonaAdmin`）改成**受控组件**，收藏/停用的写入口径搬到
+   * 专家域的唯一所有者 `src/client/hooks/useWorkbenchExperts.ts`（v0.3 §12.3：
+   * 「旧 flags 的 personaFlagPatch 流程保留，**由本域 action 调用**」）。
+   * 语义一个字没变，所以这里只换**被扫的文件**，判据（唯一口径 + 先现读再算 patch）原样保留；
+   * 界面侧反过来多一条"不许再留一份写入口"的所有权断言。
+   */
   const adminSource = read('src/client/components/PersonaAdmin.tsx')
+  const expertsSource = read('src/client/hooks/useWorkbenchExperts.ts')
   const settingsSource = read('src/client/components/SettingsModal.tsx')
   assert.match(settingsSource, /<PersonaAdmin/, '设置页必须挂上角色库管理')
-  assert.match(adminSource, /personaFlagPatch\(/, '写入口径与选择器共用同一个纯函数')
-  assert.match(adminSource, /\/api\/workbench\/settings/, '通过设置接口写')
-  const beforePatch = adminSource.slice(0, adminSource.indexOf('personaFlagPatch('))
-  assert.match(beforePatch, /api\/workbench\/settings'\)/, '改动前先读服务端现值（不许拿本地副本算 patch）')
+  assert.match(expertsSource, /personaFlagPatch\(/, '写入口径与选择器共用同一个纯函数')
+  assert.match(expertsSource, /const SETTINGS_PATH = '\/api\/workbench\/settings'/, '通过设置接口写（字面量只此一处）')
+  // 写之前必须先现读服务端现值：`await api<...>(SETTINGS_PATH)` 出现在 `personaFlagPatch(` 之前。
+  assert.match(
+    expertsSource,
+    /await api<[\s\S]{0,400}?>\(SETTINGS_PATH\)[\s\S]{0,400}?personaFlagPatch\(/,
+    '改动前先读服务端现值（不许拿本地副本算 patch）',
+  )
+  assert.doesNotMatch(adminSource, /personaFlagPatch\(/, '受控界面里不许再留第二份写入口（所有权唯一）')
 })
 
 test('分组 / 标签：分组按展示顺序排、显示名是中文、来源标签可读', () => {

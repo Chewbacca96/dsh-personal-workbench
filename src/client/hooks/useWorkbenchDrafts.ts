@@ -48,6 +48,12 @@
 import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { api } from '../api.js'
 import type { DraftView } from '../../shared/contracts.js'
+import type { ExpertInstallResult } from '../../shared/expert.js'
+/**
+ * 专家域的唯一 reader（P8）：从确认回执里读出安装结果。
+ * 只 import 一个纯函数，不 import 专家域 hook（避免 hook 之间成环）。
+ */
+import { readExpertInstalledFromOutcome } from './useWorkbenchExperts.js'
 import type { DraftConfirmOutcome } from '../components/DraftBanner.js'
 
 /** 「库里已有同名任务」的待决提示（`reuseExistingTask` 的入参形状）。 */
@@ -66,6 +72,16 @@ export interface UseWorkbenchDraftsInput {
   refresh: () => Promise<void>
   onError: (message: string | null) => void
   onNotice: (message: string | null) => void
+  /**
+   * **专家草稿安装成功**的回调（P8 / 方案 §9.4 最后一条）。
+   *
+   * 为什么由草稿域转发而不是让 `DraftBanner` 直接调专家域：草稿域才是"待确认草稿 +
+   * 确认回执"的 owner，横幅只把结构化回执交上来（`DraftConfirmOutcome.expert`）；
+   * 转发这一步是装配层的跨域组合（方案 §12.3：组件不得直接调用别的域的 controller）。
+   *
+   * 只有**真的装上了**（回执里带 `expert`）才会被调用 —— 放弃/暂存/回放不刷新目录。
+   */
+  onExpertInstalled?: (expert: ExpertInstallResult) => void
 }
 
 export interface UseWorkbenchDraftsActions {
@@ -107,7 +123,7 @@ export interface UseWorkbenchDraftsResult {
 }
 
 export function useWorkbenchDrafts(input: UseWorkbenchDraftsInput): UseWorkbenchDraftsResult {
-  const { refresh, onError: setError, onNotice: setNotice } = input
+  const { refresh, onError: setError, onNotice: setNotice, onExpertInstalled } = input
   const [pendingDraft, setPendingDraft] = useState<DraftView | null>(null)
   // 已暂存的待确认草稿：不自动弹窗，只在「待处理」弹窗里等你唤回
   const [deferredDrafts, setDeferredDrafts] = useState<DraftView[]>([])
@@ -213,6 +229,21 @@ export function useWorkbenchDrafts(input: UseWorkbenchDraftsInput): UseWorkbench
    * 3. `reused` —— 用户选了"就用已有那条"，同样没有新建。
    */
   const handleDraftConfirmed = (outcome: DraftConfirmOutcome, draft: DraftView): void => {
+    /**
+     * 专家分支（P8）：安装成功后**重读专家目录**（AX-E56）。
+     *
+     * 只认"回执里带 expert"这一条判据（= 服务端说这次真的装上了）。
+     * 放弃 / 暂存 / 回放（`replayed` 时 `expert` 也在，但目录刷新是幂等的读操作，
+     * 多读一次没有副作用）都不会走到这里。
+     *
+     * 形状用 `readExpertInstalledFromOutcome` 读（跨域边界不硬编类型）——
+     * 这样即便回执多包一层，也由**专家域那唯一一处**reader 判定，而不是这里再猜一次。
+     */
+    const installed = readExpertInstalledFromOutcome(outcome)
+    if (installed !== null) {
+      onExpertInstalled?.(installed)
+      return
+    }
     if (outcome.duplicateOf !== undefined) {
       setDuplicatePrompt({
         draftId: draft.id,

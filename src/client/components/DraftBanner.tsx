@@ -20,6 +20,17 @@ import { api } from '../api.js'
 import { openSessionInMainView } from '../sessionRef.js'
 import { fmtTime } from '../format.js'
 import type { DraftConfirmProblemView, DraftView } from '../../shared/contracts.js'
+import type { ExpertInstallResult } from '../../shared/expert.js'
+import { ExpertDraftBody } from './ExpertDraftBody.js'
+import {
+  expertDraftButtons,
+  isExpertDraft,
+  readExpertDraftPayload,
+  type ExpertConfirmOutcomeView,
+  type ExpertDraftPayloadRead,
+  type ExpertValidateOutcome,
+  type ExpertUiError,
+} from '../hooks/useWorkbenchExperts.js'
 
 export interface DraftBannerRuntime {
   sessions: { open: (sessionId: string) => void }
@@ -52,6 +63,13 @@ export interface DraftConfirmOutcome {
   reused?: boolean
   /** 本次确认对应的任务 id（用于「就用已有那条」时重新绑定的收口）。 */
   taskId?: string
+  /**
+   * 专家草稿安装成功的回执（P8）：`expert` 非空表示**这次真的装上了**。
+   *
+   * 与 `replayed` 分开：回放（此前已确认过）也会带回同一份 `expert`，
+   * 但"装上去了"这件事只发生一次 —— 外层的目录刷新只看这个字段。
+   */
+  expert?: ExpertInstallResult | null
 }
 
 export interface DraftBannerProps {
@@ -135,6 +153,20 @@ export interface DraftBannerProps {
    * `~/.dsh/memory` 是否存在，或 `DSH_MEMORY_HOME` / `TEAM_MEMORY_HOME` 显式声明）。
    */
   memoryAvailable?: boolean
+  /**
+   * **专家草稿的动作**（P8）：校验 / 确认安装 / 打开生成会话。
+   *
+   * 为什么不在这里直接发请求：专家确认要带 `expectedVersion` + `manifestHash`
+   * 两个字段、失败后要按"版本冲突"重读预览（AX-E54/E55）——那套判定属于专家域，
+   * 由 `useWorkbenchExperts` 拥有；本组件只把回执画出来。
+   *
+   * 缺省 `undefined` = 当前界面**没有接上**这套动作 → 这几个按钮全部禁用并明说，
+   * 而不是让"确认"按钮点了没反应（`create` 能力缺失同理，方案 §10 降级表）。
+   */
+  expertActions?: {
+    validate: (draft: DraftView) => Promise<ExpertValidateOutcome>
+    confirm: (draft: DraftView) => Promise<ExpertConfirmOutcomeView>
+  }
 }
 
 interface DraftPresentation {
@@ -269,7 +301,7 @@ export function reviewMemoryNotes(payload: Record<string, unknown>): string[] {
   ))
 }
 
-export function DraftBanner({ draft, onDone, runtime, closePanel, kindName, onProblems, onNotice, isSessionUsable, onDismissed, onClose, onConfirmed, onSettled, switchedFrom, memoryAvailable = false }: DraftBannerProps): ReactNode {
+export function DraftBanner({ draft, onDone, runtime, closePanel, kindName, onProblems, onNotice, isSessionUsable, onDismissed, onClose, onConfirmed, onSettled, switchedFrom, memoryAvailable = false, expertActions }: DraftBannerProps): ReactNode {
   const [busy, setBusy] = useState(false)
   /**
    * 复盘的团队记忆可见性（v1.14.0：复盘确认时自动写入团队记忆库）。
@@ -353,6 +385,76 @@ export function DraftBanner({ draft, onDone, runtime, closePanel, kindName, onPr
       onDismissed?.()
       onDone()
 
+    } finally { setBusy(false) }
+  }
+  /**
+   * ## 专家草稿（P8 / 方案 §9.4）
+   *
+   * 为什么**不能**复用上面的 `act()`：
+   * 1. 确认安装必须带 `{ expectedVersion, manifestHash }` 两个字段，而 `act` 只会发
+   *    一个通用 body —— "所见版本"与"所确认版本"必须一致（AX-E54）；
+   * 2. 版本冲突要走**独立分支**：服务端回最新草稿，界面刷新预览，
+   *    **绝不替用户自动确认新内容**（AX-E55）。`act` 的 catch 只会把它当普通失败。
+   *
+   * `expertDraft` 是"就地刷新后的预览"：校验与版本冲突都会带回服务端那一份，
+   * 只在本组件内生效，不碰草稿域（草稿域的投影由 5 秒轮询与 `onDismissed` 管）。
+   */
+  const isExpert = isExpertDraft(draft)
+  const [expertDraft, setExpertDraft] = useState<DraftView | null>(null)
+  const [expertError, setExpertError] = useState<ExpertUiError | null>(null)
+  /** 就地刷新后的那一份（只在 id 相同时顶替，避免上一条草稿的刷新结果串到这一条）。 */
+  const expertView = isExpert && expertDraft !== null && expertDraft.id === draft.id ? expertDraft : draft
+  const expertPayload: ExpertDraftPayloadRead | null = isExpert
+    ? readExpertDraftPayload(expertView)
+    : null
+  const expertVersion = expertPayload !== null && expertPayload.ok ? expertPayload.payload.contentVersion : null
+  /**
+   * 装配层没接上专家动作时，一律按"缺能力"处理：按钮禁用 + 明确原因，
+   * 不静默降级成"点了没反应"（方案 §10 降级表）。
+   */
+  const expertWired = expertActions !== undefined
+  const expertButtons = expertDraftButtons(
+    expertPayload !== null && expertPayload.ok ? expertPayload.payload.phase : 'unknown',
+    busy || expertWired === false,
+    expertWired === false
+      ? { code: 'create-unavailable', message: '当前界面没有接上专家草稿动作（装配缺失），无法校验或安装。' }
+      : expertError,
+  )
+  const runExpert = async (kind: 'validate' | 'confirm'): Promise<void> => {
+    if (busy || expertActions === undefined) return
+    setBusy(true)
+    setExpertError(null)
+    try {
+      if (kind === 'validate') {
+        const outcome = await expertActions.validate(expertView)
+        if (outcome.draft !== null) setExpertDraft(outcome.draft)
+        if (outcome.ok === false) {
+          setExpertError({ code: outcome.code ?? 'validate-failed', message: outcome.message ?? '校验失败。' })
+        } else if (outcome.problems.length > 0) {
+          setExpertError({ code: 'draft-not-validated', message: `校验没通过：${outcome.problems.join('；')}` })
+        } else {
+          onNotice?.('校验通过，可以确认安装了。', 'success')
+        }
+        return
+      }
+      const outcome = await expertActions.confirm(expertView)
+      if (outcome.ok === true) {
+        onConfirmed?.({ expert: outcome.expert })
+        onDismissed?.()
+        onDone()
+        return
+      }
+      if (outcome.refreshed !== null) {
+        setExpertDraft(outcome.refreshed)
+        setExpertError({
+          code: outcome.code ?? 'version-conflict',
+          message: `${outcome.message ?? '这份内容已经变了。'}预览已刷新成最新版本；**没有**替你自动确认，请核对后重新校验再确认。`,
+        })
+        return
+      }
+      setExpertError({ code: outcome.code ?? 'confirm-failed', message: outcome.message ?? '安装失败。' })
+    } catch (error) {
+      setExpertError({ code: 'confirm-failed', message: error instanceof Error ? error.message : String(error) })
     } finally { setBusy(false) }
   }
   const presentation = describeDraft(draft, kindName)
@@ -440,26 +542,53 @@ export function DraftBanner({ draft, onDone, runtime, closePanel, kindName, onPr
       nonModal
       footer={(
         <>
-          <button
-            className="wb-btn primary"
-            disabled={busy}
-            onClick={() => void act(
-              `/api/workbench/drafts/${draft.id}/confirm`,
-              draft.kindCode === 'review' ? { memoryScope, memoryEnabled } : undefined,
-            )}
-          >
-            {presentation.confirmLabel}
-          </button>
-          {canDefer && (
-            <button className="wb-btn" disabled={busy} title={presentation.deferHint ?? DEFER_HINT} onClick={() => void act(`/api/workbench/drafts/${draft.id}/defer`, deferBody)}>
-              {presentation.deferLabel ?? DEFER_LABEL}
-            </button>
-          )}
-          <button className="wb-btn" disabled={busy} onClick={() => void act(`/api/workbench/drafts/${draft.id}/abandon`)}>
-            {presentation.abandonLabel}
-          </button>
-          {presentation.sessionLabel !== null && presentation.sessionId !== '' && (
-            <button className="wb-btn" onClick={openSession}>{presentation.sessionLabel}</button>
+          {isExpert ? (
+            /**
+             * 专家草稿的底栏只留"不改变内容"的两个动作。
+             *
+             * 「校验 / 确认安装专家」在预览里（`ExpertDraftBody`），因为它们必须紧跟
+             * "看到的是哪一版"；底栏这里再造一个"确认"会让用户在不看版本的地方点下去。
+             * 放弃**必须带 `expectedVersion`**：服务端按版本校验，避免放弃掉 AI 刚改完的那一版。
+             */
+            <>
+              {canDefer && (
+                <button className="wb-btn" disabled={busy} title={presentation.deferHint ?? DEFER_HINT} onClick={() => void act(`/api/workbench/drafts/${draft.id}/defer`, deferBody)}>
+                  {presentation.deferLabel ?? DEFER_LABEL}
+                </button>
+              )}
+              <button
+                className="wb-btn"
+                disabled={busy || expertVersion === null}
+                title={expertVersion === null ? '读不出这一版的版本号，先别放弃' : `放弃 v${expertVersion}`}
+                onClick={() => void act(`/api/workbench/drafts/${draft.id}/abandon`, { expectedVersion: expertVersion })}
+              >
+                {presentation.abandonLabel}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className="wb-btn primary"
+                disabled={busy}
+                onClick={() => void act(
+                  `/api/workbench/drafts/${draft.id}/confirm`,
+                  draft.kindCode === 'review' ? { memoryScope, memoryEnabled } : undefined,
+                )}
+              >
+                {presentation.confirmLabel}
+              </button>
+              {canDefer && (
+                <button className="wb-btn" disabled={busy} title={presentation.deferHint ?? DEFER_HINT} onClick={() => void act(`/api/workbench/drafts/${draft.id}/defer`, deferBody)}>
+                  {presentation.deferLabel ?? DEFER_LABEL}
+                </button>
+              )}
+              <button className="wb-btn" disabled={busy} onClick={() => void act(`/api/workbench/drafts/${draft.id}/abandon`)}>
+                {presentation.abandonLabel}
+              </button>
+              {presentation.sessionLabel !== null && presentation.sessionId !== '' && (
+                <button className="wb-btn" onClick={openSession}>{presentation.sessionLabel}</button>
+              )}
+            </>
           )}
         </>
       )}
@@ -486,7 +615,22 @@ export function DraftBanner({ draft, onDone, runtime, closePanel, kindName, onPr
             系统把下面这一份递补上来了。请确认内容无误再操作，避免误确认。
           </div>
         )}
-        {presentation.body}
+        {isExpert ? (
+          /**
+           * 专家草稿的正文用**专用预览**（方案 §9.4）：生成方式、逐条来源、必需/可选
+           * skill 与安装/复用决策、校验错误。这里刻意**不显示**"创建任务"这类假文案 ——
+           * 专家草稿不建任务，它是"安装一份人格 + skill"。
+           */
+          <ExpertDraftBody
+            draft={expertView}
+            payload={expertPayload ?? readExpertDraftPayload(expertView)}
+            buttons={expertButtons}
+            busy={busy}
+            onValidate={() => void runExpert('validate')}
+            onConfirm={() => void runExpert('confirm')}
+            onOpenSession={openSession}
+          />
+        ) : presentation.body}
         {/* 复盘：团队记忆可见性选择器（受控，状态在本组件）。
             ⚠️ 仅当 `memoryAvailable` 为真才渲染 —— 团队记忆是内部系统（v1.14.58），
             开源用户拿不到服务，渲染它等于摆一个永远用不了的勾选框。 */}
@@ -509,6 +653,29 @@ export function DraftBanner({ draft, onDone, runtime, closePanel, kindName, onPr
 
 /** 各草稿类型的展示描述（纯函数，便于单测）。 */
 function describeDraft(draft: DraftView, kindName: (kind: string, code: string) => string): DraftPresentation {
+  /**
+   * 专家草稿**在碰 payload 之前就分流**（P8 / 方案 §9.4）。
+   *
+   * 为什么必须早退：它的 payload 是 `ExpertDraftPayload`（来源登记/skill/校验快照），
+   * 与任务草稿的字段完全不相交 —— 落到下面的通用分支会渲染出一堆空字段。
+   *
+   * `body: null` 不是"没内容"：正文由 `ExpertDraftBody` 渲染（它需要 `busy` 与
+   * 那两个回执回调，只能由组件体给），这里只提供标题/底栏文案。
+   * `sessionLabel: null` 也是故意的：打开生成会话的入口是正文里的
+   * 「继续让 AI 修改」，同一个动作不在底栏再放一个按钮。
+   */
+  if (isExpertDraft(draft)) {
+    return {
+      title: '待确认：新建专家',
+      body: null,
+      confirmLabel: '确认安装专家',
+      abandonLabel: '放弃这份草稿',
+      sessionLabel: null,
+      sessionId: typeof draft.sessionId === 'string' ? draft.sessionId : '',
+      canDefer: true,
+      note: '内置/外部角色只读；新建专家仅在**你确认后**写入用户库。确认按钮会带上你看到的版本与清单哈希。',
+    }
+  }
   const payload = draft.payload
   const sessionOf = (fallbackKey = 'sessionId'): string => (
     typeof draft.sessionId === 'string' && draft.sessionId !== ''

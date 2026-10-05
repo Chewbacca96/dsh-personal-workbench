@@ -56,6 +56,12 @@ import {
 import { pickIntakeWorkspace, readCreatedWorkspaceId } from '../intakeWorkspace.js'
 import { acquireSession, openSessionInMainView, type SessionReference } from '../sessionRef.js'
 import { currentSessionIdOf, safeService } from '../runtimeServices.js'
+/**
+ * P8 §9.2：角色入口守卫复用专家域那**同一份** preflight 投影
+ * （`fetchExpertPreflight` 内部走 `/api/workbench/experts/preflight`）。
+ * 只 import 两个纯函数 —— 不 import 专家域 hook，避免 hook 互相 import 成环。
+ */
+import { expertPersonaPreflightError, fetchExpertPreflight } from './useWorkbenchExperts.js'
 import { resolveModelDirectoryOutcomeFor } from '../components/ModelPicker.js'
 import {
   effectiveModelLabel, effectiveSelection, evaluateImageSupport, selectionToApply,
@@ -758,6 +764,21 @@ export function useWorkbenchAISessions(input: UseWorkbenchAISessionsInput): UseW
        *   否则用户会以为"选了角色"，实际这一轮根本没有角色可用。
        */
       if (personaId !== '') {
+        /**
+         * 入口守卫（P8 §9.2）：绑定**之前**先按 preflight 判一次"这个角色当前可用吗"。
+         *
+         * 三件事必须说清楚：
+         * 1. 用的是**同一份** preflight（`fetchExpertPreflight`；
+         *    `/expert` 手动入口与选择器判可用性也走它），不是另写一条判定；
+         * 2. **只加守卫，不改绑定语义**：下面 `POST /personas/bind` 的调用与
+         *    `bound.binding.personaId !== personaId` 的校验逐字未动，
+         *    也**没有**"换角色就要新会话"这类规则；
+         * 3. 预检取不到（旧服务端没装专家模块 / 网络失败）返回 `null` ⇒ **不拦人**，
+         *    普通 persona 的绑定行为与 P8 之前完全一致（AX-E58 不回归）。
+         */
+        const preflight = await fetchExpertPreflight(api, { sessionId: id, personaId })
+        const blocked = preflight === null ? null : expertPersonaPreflightError(preflight)
+        if (blocked !== null) throw new Error(blocked)
         const bound = await api<{ ok: boolean; binding: { personaId: string; revision: string } }>('/api/workbench/personas/bind', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },

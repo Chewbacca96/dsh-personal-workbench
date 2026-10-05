@@ -33,6 +33,8 @@ import { useWorkbenchFeedback } from './hooks/useWorkbenchFeedback.js'
 import { useWorkbenchSettings } from './hooks/useWorkbenchSettings.js'
 import { useWorkbenchReminders } from './hooks/useWorkbenchReminders.js'
 import { useWorkbenchDrafts } from './hooks/useWorkbenchDrafts.js'
+import { useWorkbenchExperts } from './hooks/useWorkbenchExperts.js'
+import type { ExpertInstallResult } from '../shared/expert.js'
 import { useWorkbenchPolling } from './hooks/useWorkbenchPolling.js'
 import { useWorkbenchNavigation } from './hooks/useWorkbenchNavigation.js'
 import { useWorkbenchBusy } from './hooks/useWorkbenchBusy.js'
@@ -174,9 +176,27 @@ function WorkbenchApp({ runtime, closePanel }: { runtime: WorkbenchRuntime; clos
     currentTaskId,
     linkSessionRequest,
   } = data.actions
+  /**
+   * 专家域（P8）：**草稿域要用的那一个回调**先做成惰性转发 ref。
+   *
+   * 顺序约束：专家域 hook 必须晚于 `workspaceChoices`（它读那份工作区快照，见下），
+   * 而草稿域在这里就要拿到「专家安装成功 → 重读目录」的入口。入口既有的破顺序依赖
+   * 范式就是这个惰性 ref（同 `startAISessionRef`）：先给一个稳定的转发函数，
+   * 专家域就绪后一行内写入 `current`。
+   */
+  const expertInstalledRef = useRef<((expert: ExpertInstallResult) => void) | null>(null)
   // 草稿域（D17/P5-3）：调用点必须在 `refresh`（任务数据域）与 `setError` / `setNotice`
   // （反馈域）之后 —— 三个都是以注入形式进来的（`const` 没有提升）。
-  const draftsApi = useWorkbenchDrafts({ refresh, onError: setError, onNotice: setNotice })
+  const draftsApi = useWorkbenchDrafts({
+    refresh,
+    onError: setError,
+    onNotice: setNotice,
+    /**
+     * 专家草稿确认成功（P8 §9.4）：安装回执由草稿域交回专家域，由专家域**重读目录**。
+     * 不在这里直接 `api(...)` —— 网络与目录状态都归专家域所有（§12.3）。
+     */
+    onExpertInstalled: (expert) => { expertInstalledRef.current?.(expert) },
+  })
   const { pendingDraft, allPendingDrafts } = draftsApi
   // 提醒域（D17/P5-2）：`reminderModalOpen` 已收进 hooks/useWorkbenchReminders.ts（见下方解构）。
   // 草稿域（D17/P5-3）：`pendingOpen`（待处理弹窗开关）已收进 hooks/useWorkbenchDrafts.ts。
@@ -661,6 +681,49 @@ function WorkbenchApp({ runtime, closePanel }: { runtime: WorkbenchRuntime; clos
     defaultWorkspace: settings.defaultWorkspace,
   })
 
+  /**
+   * 专家域（P8 §12.3）：目录 / 生成弹窗 / 自主召唤开关 / 专家草稿动作的**唯一所有者**。
+   *
+   * 落点必须在 `workspaceChoices` 之后：新建专家的默认工作区就是把当前会话的 cwd
+   * 拿去匹配这份快照（匹配不上就要求用户自己选，**不自动创建任务资料夹**）。
+   * 本 hook 只持有专家域自己的 state —— `WorkbenchApp` 这里**一个新 state、一个新请求、
+   * 一个新定时器都没有**（AX-E58）：网络全在域内，写回通过下面两个注入点。
+   */
+  const experts = useWorkbenchExperts({
+    runtime,
+    /**
+     * 可选工作区 = 宿主**已注册工作区**的 `{ workspaceId, path }` 快照。
+     *
+     * 为什么不用 `workspaceChoices`（那是"路径候选"：已打开 ∪ 最近 ∪ 默认）：
+     * `sessions.create({ workspaceId })` 要的是**工作区 id**，而路径候选里
+     * 可能根本没有 id（还没注册）。生成入口**只挑已有工作区**，绝不在这里
+     * 顺手 `workspaces.create` —— 那会在用户没确认目录的情况下凭空建一个工作区。
+     * 与 `openWorkspacePaths()` 同样的逐层加固（低版本宿主缺 `list` 时返回空）。
+     */
+    workspaceChoices: () => (safeService<WorkbenchRuntime['workspaces']>(runtime, 'workspaces')?.list?.getSnapshot?.()?.items ?? [])
+      .map((item) => ({ workspaceId: item.workspaceId, path: item.path })),
+    /**
+     * 当前会话的 cwd：**只从会话快照读**（`currentSessionIdOf` + `byId[id].cwd`）。
+     * 读不到就返回空串 ⇒ 界面要求用户手选工作区，而不是猜一个目录。
+     */
+    currentCwd: () => {
+      const sessionId = currentSessionIdOf(runtime)
+      if (sessionId === null) return ''
+      return sessionListSnapshot.byId[sessionId]?.cwd ?? ''
+    },
+    settings: { autoSummonExperts: settings.autoSummonExperts },
+    /**
+     * 设置写回：开关/收藏/停用都是**立即保存**，所以要把服务端回写值同步进设置域，
+     * 否则用户下一次点「保存设置」（提交设置域里的整份字段）会把它们悄悄改回旧值。
+     * 用 `setSettings` 原语（native Dispatch），与入口既有的两个快捷键写法一致。
+     */
+    writeSettings: (patch) => setSettings((prev) => ({ ...prev, ...patch })),
+    isAlive: () => instanceAlive,
+    onError: (message) => setError(message),
+    onNotice: (message) => setNotice(message),
+  })
+  expertInstalledRef.current = experts.actions.handleExpertConfirmed
+
   // 新建任务表单"每次打开都清空工作区"的 effect 已随 4 项状态收进 hooks/useTaskForms.ts（P3-3）
 
   // 快速录入域（D17/P6-2）：投影函数（预填路径 / 来源提示 / 是否手动改过 / 建资料夹默认勾选）
@@ -703,7 +766,7 @@ function WorkbenchApp({ runtime, closePanel }: { runtime: WorkbenchRuntime; clos
    */
   const assembly: WorkbenchAssembly = {
     nav, data, forms, detail, taskList, day, quick, ai,
-    prefs, dir, busyApi, remindersApi, draftsApi, knowledge, ideas, feedback,
+    prefs, dir, busyApi, remindersApi, draftsApi, knowledge, ideas, feedback, experts,
     runtime, closePanel, loadModelModalityTable, aiSessionUsable,
     collapseAll, dayPanelProps, now, pendingCount, linkedSessionIds, sessionCandidates,
     sessionListSnapshot, reparentCandidates, workspaceChoices, openTask, openTaskById,
