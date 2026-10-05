@@ -30,7 +30,11 @@ import { ReminderScheduler } from './reminder/scheduler.js'
 import { readWeixinInboundCount } from './reminder/weixin-status.js'
 import type { TeamMemoryService } from './review-memory.js'
 import { taskWorkspaceFolderName } from './client/taskFolder.js'
-import { loadPersonaTool, proposeDailyPlanTool, proposeIdeaClustersTool, proposeSubtasksTool, readPersonaResourceTool, requestCompletionTool, saveTaskMemoryTool, submitIdeaTasksTool, submitKnowledgeTool, submitReportTool, submitReviewTool, submitTaskTool, updateProgressTool, updateTaskTool } from './tools.js'
+import { loadPersonaTool, proposeDailyPlanTool, proposeIdeaClustersTool, proposeSubtasksTool, readPersonaResourceTool, requestCompletionTool, saveTaskMemoryTool, submitIdeaTasksTool, submitKnowledgeTool, submitReportTool, submitReviewTool, submitTaskTool, updateProgressTool, updateTaskTool, type PersonaDependencyPreflight } from './tools.js'
+import { probeExpertSkills } from './experts/host-adapter.js'
+import { createExpertService, type ExpertService } from './experts/service.js'
+import { registerWorkbenchSkillProvider, type SkillRegistrarLike, type WorkbenchSkillRegistration } from './experts/skill-provider.js'
+import { expertGenerationTools } from './experts/tools.js'
 
 export const name = 'personal-workbench'
 
@@ -217,6 +221,14 @@ export function workbenchCommandDefinition(db: DatabaseSync): CommandDefinitionP
 
 export interface Config extends WorkbenchDbConfig {
   announceToAgent?: boolean
+  /**
+   * 工作台主目录覆盖（**只给测试/多机部署**）。
+   *
+   * 设了它，`~/.dsh/workbench` 整体挪到 `<home>/.dsh/workbench`：数据库、专家库、
+   * 角色用户库都跟着走 —— 测试因此可以在临时目录里跑完整 `apply()`，
+   * **不会读写用户真实的工作台数据**。缺省（undefined）= `homedir()`，生产行为不变。
+   */
+  home?: string
   /** 提醒调度器扫描间隔（毫秒），缺省 30s；测试可调小 */
   reminderScanIntervalMs?: number
   /** 知识库自动召回：全局缺省开关（不传则读 meta，缺省**开**）。 */
@@ -234,10 +246,24 @@ export interface Config extends WorkbenchDbConfig {
   knowledgeRecallMaxEntries?: number
 }
 
+/**
+ * `config.home` 的覆盖口径（只给测试/多机部署）：把**默认**数据库目录挪到
+ * `<home>/.dsh/workbench`。显式 `dataDir`/`dbPath` 仍然优先。
+ */
+function workbenchDbConfigFor(config: Config): WorkbenchDbConfig {
+  if (typeof config.home !== 'string' || config.home.trim() === '') return config
+  return { dataDir: join(config.home, '.dsh', 'workbench'), ...config }
+}
+
+/** 角色/专家两套目录的共同覆盖项：生产不传（`{}` ⇒ 宿主目录约定）。 */
+function homeRootOverride(config: Config): { home: string } | Record<string, never> {
+  return typeof config.home === 'string' && config.home.trim() !== '' ? { home: config.home } : {}
+}
+
 export function apply(ctx: Context, config: Config = {}): void {
   let db: DatabaseSync
   try {
-    db = openWorkbenchDb(config)
+    db = openWorkbenchDb(workbenchDbConfigFor(config))
     seedDictionaries(db)
   } catch (error) {
     applyDegraded(ctx, error, config)
@@ -282,7 +308,38 @@ function applyDegraded(ctx: Context, error: unknown, config: Config): void {
 }
 
 /** 数据库正常可用时的完整装配（原 apply 主体）。 */
+/**
+ * §9.2：把专家服务的 preflight 结论翻成"普通 `workbench_load_persona` 能不能加载"。
+ *
+ * 判据只有一个：**`usable === false` 才拒绝**。`preliminary` 只表示"视角降级"
+ * （HTTP/无 scope 时的预检），**不是**"不可用" —— 拿它当拒绝依据会把一批本来能用的
+ * 角色挡在门外。
+ *
+ * `agent` 必须**原样**来自工具执行上下文（`exec.agent`）：预检要按 live agent 的真实
+ * scope 判定"最近层同名技能胜出"（§7.3）。少了它，预检会退回全局视角，
+ * 与执行时看到的技能库可能不是同一个 —— 那正是"预检说行、跑起来找不到"的成因。
+ */
+async function personaDependencyPreflight(service: ExpertService, personaId: string, agent?: unknown): Promise<PersonaDependencyPreflight> {
+  const result = await service.preflight(personaId, agent)
+  if (result.usable) return { ok: true }
+  const missing = result.effectiveSkills
+    .filter((skill) => skill.required === true && skill.available === false)
+    .map((skill) => skill.name)
+  const parts = [
+    `预检状态 ${result.status}`,
+    missing.length === 0 ? '' : `缺失的必需技能：${missing.join('、')}`,
+    ...result.issues.slice(0, 3).map((issue) => `${issue.code}：${issue.message}`),
+  ].filter((part) => part !== '')
+  return { ok: false, message: parts.join('；') }
+}
+
 function applyReady(ctx: Context, db: DatabaseSync, config: Config): void {
+  /**
+   * 角色库/专家库的目录覆盖（`config.home`，只给测试/多机部署）。
+   * 生产是 `{}` ⇒ `resolveExpertRoots({})` / `resolvePersonaRoots(db, {})` 走宿主目录约定。
+   */
+  const rootOptions = homeRootOverride(config)
+
   // 微信提醒通道适配层：ctx.get('dshIm') 软探测，未安装时静默降级。
   const adapter = new WechatChannelAdapter({
     db,
@@ -353,8 +410,45 @@ function applyReady(ctx: Context, db: DatabaseSync, config: Config): void {
     maxEntries: config.knowledgeRecallMaxEntries,
   })
 
+  /**
+   * 专家服务（P5）：草稿 / 暂时文件 / 安装 / 恢复的**唯一**状态所有权。
+   *
+   * 必须在 `makeRoutes` **之前**建好：HTTP 路由与 5 个生成工具共用同一个实例
+   * （"一份 service"是 AX-E50 的判据）。生产不传 `roots`/`now`/`failpoint` ——
+   * 它们由宿主目录约定决定，**绝不**从 HTTP 请求里取。
+   */
+  const experts = createExpertService({ db, ctx, roots: rootOptions })
+
+  /**
+   * 启动恢复：清扫上次中断的安装（journal + `.pending`）。
+   *
+   * 顺序是硬要求（P3/P4 交接）：**必须在注册技能 provider 之前**跑。
+   * 下面所有用到它的地方都 `await`（或 `.then`）这个 promise，所以即使将来
+   * `recover()` 变成真正异步的，顺序也不会被悄悄破坏。
+   * 恢复发现的问题**不阻止插件启动**：`repair-required` 只影响那一个专家。
+   */
+  const expertRecovery = experts.recover()
+  void expertRecovery.then((issues) => {
+    if (issues.length === 0) return
+    ctx.logger?.warn?.(
+      `[dsh-personal-workbench] 专家安装恢复发现 ${issues.length} 条待处理问题：`
+      + issues.map((issue) => `${issue.code}(${issue.field})`).join('、'),
+    )
+  }).catch((error) => {
+    const notice = `[dsh-personal-workbench] 专家安装恢复失败（插件继续加载）：${error instanceof Error ? error.message : String(error)}`
+    ctx.logger?.error?.(notice)
+    console.error(notice)
+  })
+
   const routes = makeRoutes(db, {
     knowledgeRecall,
+    /**
+     * 角色库根覆盖（同上）：与 `loadPersonaTool` 用**同一份**覆盖项，
+     * 否则"路由里选中的角色"和"工具加载的角色"会指向两套目录。
+     */
+    personas: rootOptions,
+    /** 专家服务：路由与草稿确认/放弃分支共用（未装配时那一段整体不注册）。 */
+    experts,
     /**
      * 团队记忆服务：**软探测**（`dsh-team-memory` 目前只注册 AI 工具、没有 provide 服务，
      * 所以这里通常拿不到 → 走"本地 Markdown + 队列补传"的等价通道）。
@@ -413,14 +507,77 @@ function applyReady(ctx: Context, db: DatabaseSync, config: Config): void {
          * 不接受任何 session/角色 id 入参（越权面在结构上不存在）。
          * 生产不注入根覆盖：三级根由设置项 + 包内资产 + 用户主目录算出来。
          */
-        loadPersonaTool(db), readPersonaResourceTool(db),
+        loadPersonaTool(db, rootOptions, (personaId, exec) => personaDependencyPreflight(experts, personaId, exec?.agent)), readPersonaResourceTool(db, rootOptions),
         // 知识库回流：模型主动查 + 自动召回的开关/引用回报（与钩子共用同一个管理器）。
         searchKnowledgeTool(knowledgeRecall), knowledgeRecallControlTool(knowledgeRecall),
+        /**
+         * 专家**生成通道**的 5 个工具（§5.1）：只写到 validate，正式库要等用户确认。
+         * 这里**不注册任何确认/安装工具**（AX-E34）—— 那是用户在界面上的动作。
+         */
+        ...expertGenerationTools(experts),
       ].map((tool) => ctx.tools.register(tool))
       return () => { for (const dispose of disposers) dispose() }
     },
     'dsh-personal-workbench: tools',
   )
+
+  /**
+   * 技能 provider（P4 的 `registerWorkbenchSkillProvider`）：**可选增量**。
+   *
+   * `skills` 是可选服务：一律走 `ctx.inject([...])` 子 fiber + `probeExpertSkills` 软探测，
+   * **绝不能**写进顶层 `inject` —— 缺一个依赖就整个插件 pending（本仓已复发 3 次）。
+   * 宿主没装 skills 时只记一条降级日志：不注册 provider，也不伪造"技能可用"。
+   */
+  ctx.inject(['skills'], (skillsCtx) => {
+    let registration: WorkbenchSkillRegistration | undefined
+    let disposed = false
+    void expertRecovery.then(() => {
+      if (disposed) return
+      const skills = probeExpertSkills(skillsCtx)
+      if (skills === undefined) {
+        skillsCtx.logger?.warn?.(
+          '[dsh-personal-workbench] 宿主没有 skills 服务：专家技能 provider 未注册'
+          + '（依赖检查降级为 skill-service-unavailable，其余功能照常）。',
+        )
+        return
+      }
+      /**
+       * `probeExpertSkills` 只保证宿主技能服务有 `list`；注册 provider 还需要
+       * `registerProvider`。这里按"用到什么就检查什么"再确认一次，缺它就降级
+       * （记日志、不注册），**不伪造**一个注册表。
+       */
+      const registerProvider = (skills as { registerProvider?: SkillRegistrarLike['registerProvider'] }).registerProvider
+      if (typeof registerProvider !== 'function') {
+        skillsCtx.logger?.warn?.(
+          '[dsh-personal-workbench] 宿主的 skills 服务没有 registerProvider：专家技能 provider 未注册'
+          + '（依赖检查降级为 skill-service-unavailable，其余功能照常）。',
+        )
+        return
+      }
+      const registrar: SkillRegistrarLike = { registerProvider: registerProvider.bind(skills) }
+      registration = registerWorkbenchSkillProvider(registrar, {
+        skillsDir: experts.roots.skillsDir,
+        personasDir: experts.roots.personasDir,
+        platform: process.platform,
+      })
+      /**
+       * 安装器改完正式库后要刷新宿主注册表：接到**这份** registration 上
+       * （只活在这个子 fiber 的生命周期里，**不当**长期单例存）。
+       */
+      experts.setSkillInvalidator(() => registration?.invalidateSkills() ?? false)
+      skillsCtx.logger?.info?.(`[dsh-personal-workbench] 专家技能 provider「${registration.providerName}」已注册。`)
+    }).catch((error) => {
+      skillsCtx.logger?.warn?.(
+        `[dsh-personal-workbench] 注册专家技能 provider 失败（插件继续加载）：${error instanceof Error ? error.message : String(error)}`,
+      )
+    })
+    return () => {
+      disposed = true
+      experts.setSkillInvalidator(undefined)
+      registration?.dispose()
+      registration = undefined
+    }
+  })
 
   // `/workbench` 斜杠命令：走宿主原生命令注册（→ 原生 `/` 菜单），不自建 DOM 补全浮层。
   registerWorkbenchCommand(ctx, db)
@@ -446,4 +603,15 @@ function applyReady(ctx: Context, db: DatabaseSync, config: Config): void {
   }, 'dsh-personal-workbench: prompt')
 
   ctx.effect(() => () => { db.close() }, 'dsh-personal-workbench: db')
+
+  /**
+   * 专家服务的释放：**注册在 db 那条 effect 之后是有意的**。
+   *
+   * cordis 在同一个 fiber 里按注册**逆序**释放（`DisposableList.clear()` 会 `reverse()`，
+   * 见 `@deepseek-ai/cordis/lib/index.js` 的 `_unload`），所以"写在后面 ⇒ 先执行"：
+   * `experts.dispose()` 一定跑在 `db.close()` **之前** —— 先释放本服务拥有的东西
+   * （解挂技能刷新钩子、取消自己拥有的运行），最后才关库。
+   * 它**不关**别人的 service，也**不关** db。
+   */
+  ctx.effect(() => () => experts.dispose(), 'dsh-personal-workbench: experts')
 }

@@ -7,6 +7,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { abandonDraft, addTaskMemory, appendEvent, completeTaskCascade, confirmDailyPlanDraft, confirmIdeaClusterDraft, confirmIdeaTaskDraft, confirmKnowledgeDraft, confirmReportDraft, confirmSubtaskPlanDraft, confirmTaskDraft, createDraft, createTaskReview, deferDraft, getDictionary, getDraft, getDraftBySession, getLatestActiveDraft, getTask, isDeferrableDraftKind, linkTaskSession, listDeferredDrafts, resumeDraft, updateDraft, updateTaskWithCompletion } from '../../db/repo.js'
 import { DRAFTS_PREFIX, isLoopbackRequest, pathSegments, publicTask, readJsonBody, writeJson } from './helpers.js'
 import { writeReviewToTeamMemory, teamMemoryAvailable, type TeamMemoryService } from '../../review-memory.js'
+import type { ExpertService } from '../../experts/service.js'
 
 /** 草稿关联的任务 id（验收 / 复盘 / 拆解类草稿会带；任务类草稿确认后才存在）。 */
 function taskIdOf(draft: { payload: Record<string, unknown> }): string | undefined {
@@ -46,8 +47,12 @@ function recordDraftFeedback(
   addTaskMemory(db, { taskId, kind: action === 'rejected' ? 'note' : 'context', content, sourceSessionId: draft.sessionId })
 }
 
-export function makeDraftRoutes(db: DatabaseSync, deps: { teamMemory?: TeamMemoryService } = {}): WebRoute[] {
+export function makeDraftRoutes(
+  db: DatabaseSync,
+  deps: { teamMemory?: TeamMemoryService; experts?: ExpertService } = {},
+): WebRoute[] {
   const teamMemory = deps.teamMemory
+  const experts = deps.experts
   return [
     {
       kind: 'prefix',
@@ -135,6 +140,56 @@ export function makeDraftRoutes(db: DatabaseSync, deps: { teamMemory?: TeamMemor
                   },
                 }),
               })
+            }
+            /**
+             * 专家草稿确认（P5；实现全在 P3 的 `confirmExpertDraft`）。
+             *
+             * ⚠️ **必须放在下面那条外层 `pending` 闸门之前**（紧跟 task 幂等分支之后）：
+             * 已经 confirmed 的专家草稿再 POST 一次要走 **幂等回放** —— P3 会先恢复
+             * publication，再把当初的 `confirmResult` 原样回放（`replayed: true`），
+             * 且**不要求客户端还持最新版本、也不重复创建**。放到闸门之后，
+             * "已确认的草稿再确认"会被外层提前 400 拒掉，永远回放不到（AX-E33）。
+             *
+             * 安装结果放在 `expert` 字段；这条分支之外的所有 kind 返回结构保持不变。
+             */
+            if (draft.kindCode === 'expert') {
+              if (experts === undefined) {
+                return writeJson(res, 503, {
+                  ok: false,
+                  code: 'generation-unavailable',
+                  error: '专家服务未装配：本进程没有初始化专家能力（检查插件启动日志）',
+                })
+              }
+              if (body === undefined) return writeJson(res, 400, { ok: false, code: 'invalid-json', error: 'invalid JSON body' })
+              const expectedVersion = body.expectedVersion
+              const manifestHash = body.manifestHash
+              if (typeof expectedVersion !== 'number' || Number.isInteger(expectedVersion) === false || expectedVersion < 0) {
+                return writeJson(res, 400, {
+                  ok: false,
+                  code: 'invalid-payload',
+                  field: 'expectedVersion',
+                  error: 'expectedVersion 必填，且必须是非负整数（用校验返回的那个）',
+                })
+              }
+              if (typeof manifestHash !== 'string' || manifestHash.trim() === '') {
+                return writeJson(res, 400, {
+                  ok: false,
+                  code: 'invalid-payload',
+                  field: 'manifestHash',
+                  error: 'manifestHash 必填（用校验返回的那个；它保证用户确认的就是他看过的那份内容）',
+                })
+              }
+              try {
+                const success = await experts.confirmDraftDetailed(id, expectedVersion, manifestHash.trim())
+                return writeJson(res, 200, { ok: true, expert: success.result, replayed: success.replayed === true })
+              } catch (error) {
+                /**
+                 * 在**本地**把异常收成响应：不能让它冒到外层那个 `catch` —— 那里把
+                 * `error.message` 原样写进 400，而安装失败的消息可能带绝对路径。
+                 */
+                const projection = experts.projectFailure(error)
+                return writeJson(res, projection.status, { ok: false, ...projection.body })
+              }
             }
             if (draft.statusCode !== 'pending') {
               return writeJson(res, 400, { error: `draft is already ${draft.statusCode}` })
@@ -236,6 +291,59 @@ export function makeDraftRoutes(db: DatabaseSync, deps: { teamMemory?: TeamMemor
         if (method === 'POST' && action === 'abandon') {
           const draft = getDraft(db, id)
           if (draft === undefined) return writeJson(res, 404, { error: 'draft not found' })
+          /**
+           * 专家草稿放弃（P5；§4.1 / AX-E35）。
+           *
+           * 与其余 kind 的差别有三点，都必须走**服务**而不是这里的通用分支：
+           * 1. `expectedVersion` 要校验（用户放弃的是他看到的那一版）；
+           * 2. `phase === 'installing'` 时**必须 409 拒绝**（安装器正在写正式库，
+           *    这时放弃会让"草稿已放弃"与"文件已发布"对不上）；
+           * 3. 只清**这份草稿**的暂存区（`.pending/<draftId>/`），
+           *    清理失败只回 warning，**不回滚**已经写入的 abandoned 状态。
+           */
+          if (draft.kindCode === 'expert') {
+            if (experts === undefined) {
+              return writeJson(res, 503, {
+                ok: false,
+                code: 'generation-unavailable',
+                error: '专家服务未装配：本进程没有初始化专家能力（检查插件启动日志）',
+              })
+            }
+            if (body === undefined) return writeJson(res, 400, { ok: false, code: 'invalid-json', error: 'invalid JSON body' })
+            const expectedVersion = body.expectedVersion
+            if (typeof expectedVersion !== 'number' || Number.isInteger(expectedVersion) === false || expectedVersion < 0) {
+              return writeJson(res, 400, {
+                ok: false,
+                code: 'invalid-payload',
+                field: 'expectedVersion',
+                error: 'expectedVersion 必填，且必须是非负整数',
+              })
+            }
+            const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
+            try {
+              const result = await experts.abandonDraft(id, expectedVersion, reason)
+              if (result.ok === false) {
+                /**
+                 * 失败**对象**（不是抛出的异常）也走服务层同一个投影：
+                 * 它同样可能带服务端路径，且状态码映射必须与其余路径一致。
+                 */
+                const projection = experts.projectFailure(result)
+                return writeJson(res, projection.status, { ok: false, ...projection.body })
+              }
+              return writeJson(res, 200, {
+                ok: true,
+                draftId: result.draftId,
+                contentVersion: result.contentVersion,
+                // 清理暂存失败只当 warning 回给界面（DB 状态已经是 abandoned，不回滚）。
+                ...(result.errors.length === 0 ? {} : { errors: result.errors }),
+                ...(result.warnings.length === 0 ? {} : { warnings: result.warnings }),
+                message: result.message,
+              })
+            } catch (error) {
+              const projection = experts.projectFailure(error)
+              return writeJson(res, projection.status, { ok: false, ...projection.body })
+            }
+          }
           if (draft.statusCode !== 'pending') return writeJson(res, 400, { error: `draft is already ${draft.statusCode}` })
           const now = new Date().toISOString()
           abandonDraft(db, id)

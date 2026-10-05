@@ -27,6 +27,7 @@
   "files": [
     "lib",
     "assets/personas",
+    "assets/expert-generation",
     "cordis.patch.yml",
     "README.md",
     "LICENSE",

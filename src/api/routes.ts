@@ -14,6 +14,7 @@ import {
 } from '../db/repo.js'
 import { makeAiSessionRoutes } from './routes/ai-sessions.js'
 import { makeDraftRoutes } from './routes/drafts.js'
+import { makeExpertRoutes } from './routes/experts.js'
 import { isLoopbackRequest, readJsonBody, todayRange, writeJson } from './routes/helpers.js'
 import { makeIdeaClusterRoutes } from './routes/idea-clusters.js'
 import { makeIdeaRoutes } from './routes/ideas.js'
@@ -29,6 +30,7 @@ import { makeReportRoutes } from './routes/reports.js'
 import { makeTaskRoutes } from './routes/tasks.js'
 import type { TeamMemoryService } from '../review-memory.js'
 import { teamMemoryAvailable } from '../review-memory.js'
+import type { ExpertService } from '../experts/service.js'
 import { normalizeRecentWorkspaces } from '../shared/quickWorkspaceRecent.js'
 import { classifyTaskDay, dayPlacedIds } from '../shared/dailyPlanPolicy.js'
 import { isOpenTask } from '../shared/taskProgress.js'
@@ -133,6 +135,15 @@ export interface WorkbenchRouteDeps extends ReminderRouteDeps {
    * 这条覆盖顺序只能用假的对象测，而不是真实文件。
    */
   personas?: PersonaRouteOptions
+  /**
+   * 专家服务（P5）。
+   *
+   * 由入口（`index.ts`）创建并注入 —— **不是**这里 new 一个：草稿/安装/恢复的
+   * 状态所有权只有一份，路由与 5 个生成工具共用同一个实例。
+   * 未注入（测试里的朴素用法、或旧宿主）时 `/api/workbench/experts` 整段不注册、
+   * 草稿确认的 `expert` 分支也不接管 —— 其余路由照常，插件不会 pending。
+   */
+  experts?: ExpertService
 }
 
 /**
@@ -199,6 +210,14 @@ export function makeRoutes(db: DatabaseSync, deps: WorkbenchRouteDeps = {}): Web
      * `deps.personas` 只用于**测试注入根**（生产不传）。
      */
     ...makePersonaRoutes(db, deps.personas ?? {}),
+    // ------------------------------------------------------------------ experts
+    /**
+     * 专家生成（P5 §4.1）：能力 / catalog / 方法论 / 建草稿 / 草稿详情 / 校验 / 读暂存文件 / preflight。
+     *
+     * `deps.experts === undefined` 时整段不注册：没有服务就不该有"看起来能用"的端点
+     * （能力缺失要按 §10 明确报 503/404，而不是让请求打到空实现上）。
+     */
+    ...makeExpertRoutes(db, deps.experts),
     // ------------------------------------------------------------------ workspace ensure
     {
       kind: 'exact',
@@ -275,6 +294,14 @@ export function makeRoutes(db: DatabaseSync, deps: WorkbenchRouteDeps = {}): Web
            * 写入实现只有一处（`db/repo/experts.ts` 的 `writeExpertSettings`）。
            */
           writeExpertSettings(db, { autoSummonExperts: body.autoSummonExperts })
+          /**
+           * 专家服务的**同一份**设置在服务侧也要生效（P6 的自主召唤调度读服务）：
+           * 只在"真的是 boolean"时转发 —— 脏值（`'true'` 字符串等）落库时就被拒了，
+           * 转发脏值会让服务侧与设置页出现两套口径。
+           */
+          if (body.autoSummonExperts === true || body.autoSummonExperts === false) {
+            deps.experts?.setAutoEnabled(body.autoSummonExperts)
+          }
           if (Array.isArray(body.quickWorkspaceRecent)) {
             /**
              * ⚠️ 语义是**整表替换**（2026-09-16 从"合并"改过来）：
@@ -385,7 +412,7 @@ export function makeRoutes(db: DatabaseSync, deps: WorkbenchRouteDeps = {}): Web
         }
       },
     },
-    ...makeDraftRoutes(db, { teamMemory: deps.teamMemory }),
+    ...makeDraftRoutes(db, { teamMemory: deps.teamMemory, experts: deps.experts }),
     ...makeIdeaRoutes(db),
     ...makeIdeaClusterRoutes(db),
     ...makeKnowledgeRoutes(db),

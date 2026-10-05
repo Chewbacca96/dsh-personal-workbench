@@ -1028,6 +1028,30 @@ function personaResourceLines(resources: readonly { path: string; bytes: number 
 }
 
 /**
+ * §9.2：`workbench_load_persona` 的**必需依赖预检**（可选注入）。
+ *
+ * 为什么是回调而不是在这里 import 专家服务：`tools.ts` 不认识专家域（那是
+ * `experts/service.ts` 的职责），而且**不注入时行为必须与既有版本逐字不变** ——
+ * 旧测试构造工具时不会传回调，它们测的就是原行为。
+ */
+export interface PersonaDependencyPreflight {
+  ok: boolean
+  /** 不可用时给**可读原因**（含缺失的必需技能名）；成功时忽略。 */
+  message?: string
+}
+
+export type PersonaDependencyPreflightCallback = (
+  personaId: string,
+  /**
+   * 工具执行上下文（**不是**参数）：预检要靠它拿到 live agent 的真实 scope。
+   * 只传 `personaId` 会让预检永远走"无 scope 的全局视角"——不同 scope 的最近层先胜出
+   * （§7.3）就失效，预检结论可能与执行时不一致。**HTTP 路径没有 live agent**，
+   * 那边的 preflight 由路由自己调（不带 agent），与这里无关。
+   */
+  exec: PersonaToolExec,
+) => PersonaDependencyPreflight | Promise<PersonaDependencyPreflight>
+
+/**
  * `workbench_load_persona` —— 取回**本次会话绑定的角色**正文与资源清单。
  *
  * ## 为什么没有任何入参
@@ -1041,8 +1065,18 @@ function personaResourceLines(resources: readonly { path: string; bytes: number 
  * 未绑定 / 来源不可用 / 正文随文件变化 / 文档格式错误给的是**不同的中文原因**
  * （判定与文案在 `personas/binding.ts`，与 HTTP 绑定接口共用一处）。
  * 而且**不会**在角色失效时"顺手换一个"或"读新版本" —— 那正是需求点名禁止的静默切源。
+ *
+ * ## 依赖预检（P5，§9.2）
+ *
+ * 第三个参数是可选的必需依赖预检：**既有绑定加载成功之后**才查，
+ * 依赖不可用时**不返回正文**、但给出可读原因让调用方继续工作
+ * （而不是抛一个执行错误让模型猜发生了什么）。不传回调时行为与旧版逐字相同。
  */
-export function loadPersonaTool(db: DatabaseSync, roots: PersonaRootOptions = {}) {
+export function loadPersonaTool(
+  db: DatabaseSync,
+  roots: PersonaRootOptions = {},
+  preflight?: PersonaDependencyPreflightCallback,
+) {
   return defineTool({
     name: 'workbench_load_persona',
     description:
@@ -1061,6 +1095,27 @@ export function loadPersonaTool(db: DatabaseSync, roots: PersonaRootOptions = {}
       const result = loadSessionPersona(db, exec?.agent?.session?.id, roots)
       if (result.ok === false) return `角色加载失败（${result.code}）：${result.message}`
       const { summary, document, binding, resources, revision } = result
+      /**
+       * §9.2：绑定加载成功之后**再**查必需依赖。失败时**不返回正文** ——
+       * 否则模型会拿着一段"看起来能按它干活"的人格，去用一个根本不存在的技能。
+       * 但也不抛执行错误：给可读原因，让调用方知道该让用户装什么。
+       */
+      if (preflight !== undefined) {
+        let outcome: PersonaDependencyPreflight
+        try {
+          outcome = await preflight(summary.id, exec)
+        } catch (error) {
+          outcome = { ok: false, message: `依赖预检本身失败：${error instanceof Error ? error.message : String(error)}` }
+        }
+        if (outcome.ok === false) {
+          return [
+            `角色「${summary.name}」（id=${summary.id}）本次**不可用**：必需依赖未就绪，因此**不返回角色正文**。`,
+            `原因：${outcome.message === undefined || outcome.message === '' ? '必需依赖不可用' : outcome.message}`,
+            '处理：请把这条原因如实告诉用户（缺哪个技能就装哪个，或换一个不依赖它的角色），装好后再重新调用本工具。',
+            '不要凭记忆假装已在按该角色工作，也不要绕过这个检查。',
+          ].join('\n')
+        }
+      }
       return [
         `已加载本次会话绑定的角色「${summary.name}」（id=${summary.id}，来源 ${summary.source} / ${summary.sourceKey}，revision ${revision.slice(0, 12)}，工作模式 ${summary.mode || '未标注'}）。`,
         summary.description === '' ? '' : `简介：${summary.description}`,

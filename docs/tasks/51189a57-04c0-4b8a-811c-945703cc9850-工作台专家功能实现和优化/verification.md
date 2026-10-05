@@ -119,7 +119,7 @@ console.log(JSON.stringify(counts));
 | P2 草稿提交/分文件暂存/整包校验 | ✅ 2026-10-05 已执行 | 见 §9；typecheck 0 / build 0 / P2 三件套 77 pass / 回归 105 pass，AX-E07–E14 全 pass。原状态“未实现”保留于此 |
 | P3 安装/受管发布门/中断恢复 | ✅ 2026-10-05 已执行 | 见 §10；typecheck 0 / build 0 / 11 个测试文件 207 pass 0 fail，AX-E15–E23 全 pass；含 17 个故障点矩阵与 4 例跨进程真崩溃。原状态“未实现”保留于此 |
 | P4 skill provider / catalog / 运行前依赖预检 | ✅ 2026-10-05 已执行 | 见 §11；typecheck 0 / build 0 / P4 三件套 45 pass / 回归 207 pass，AX-E24–E30 与 AX-E49 的 scope 前置全 pass；另有真实安装器 → 真实 provider 的独立字节级证据。原状态“未实现”保留于此 |
-| P5 生成会话与调用接线 | 未实现 | 无产品运行结果 |
+| P5 生成会话与调用接线 | ✅ 2026-10-05 已执行 | 见 §12；typecheck 0 / build 0 / P5 四件套 43 pass / 专家域回归 45 pass / 全仓 1195 tests 1194 pass 1 fail（唯一失败是既有 db.test.mjs 清理期 EPERM）、AX-E31–E35 与 AX-E50 全 pass；另有真实 HTTP 全链独立证据 38/38 与 `pnpm pack` 产物核验。原状态“未实现”保留于此 |
 | P6–P7 专家调用主链 | 未实现 | 无产品运行结果 |
 | P8 客户端界面 | 未实现 | 无浏览器结果 |
 | P9 包/真实 SDK/真实 LLM | 未执行 | 不以 fake provider 代替 |
@@ -403,3 +403,50 @@ dry-run 通过、目标不等于当前实例且任务已有测试实例授权后
 - **过程事实 3（连带口径不一致，已修）**：`walkSkillPackage` 原跳过包内点开头文件，而安装器的 `packageHash` 覆盖它写入的每个文件（`src/experts/paths.ts:148` 只拒 `.`/`..` 整段）→ 含 `.foo.txt` 的**合规**包会被永久误判；已去掉包内跳过（副作用：更严）。
 - **过程事实 4（夹具必须同步）**：两个测试文件的 `workbench-install.json` 原用合成哈希（`packageHash: HEX`，catalog 连 `files[].sha256` 也是 `HEX`）；修复后会被正确判成"被改过"。新增 `test/fixtures/expertSkillFixture.mjs`（真实哈希）后，**原有 24 条用例的断言文本一字未改**。
 - **过程事实 5**：P4 由**同一子代理分两轮**完成（第一轮三源文件 + 39 test；第二轮两项修复 + 夹具真实化 → 45 test），两轮都经主会话独立复跑与逐段源码复核；未接生产装配（属 P5/P8），未执行安装/重启/发布。
+
+## 12. P5 施工记录（2026-10-05 执行）
+
+### 12.1 命令与退出码（主会话独立复跑，同一条命令链）
+
+| 命令 | 退出码 | 输出要点 |
+|---|---|---|
+| `pnpm typecheck` | 0 | `tsc --noEmit` 无输出 |
+| `pnpm build` | 0 | client 552.64 kB（gzip 163.91 kB），Build complete in 78ms |
+| `node --test test/expertRoutes.test.mjs test/expertTools.test.mjs test/expertWiring.test.mjs test/httpFence.test.mjs` | 0 | `ℹ tests 43 / pass 43 / fail 0`（16+14+8+5） |
+| `node --test test/expertProvider.test.mjs test/expertCatalog.test.mjs test/skills.test.mjs` | 0 | `ℹ tests 45 / pass 45 / fail 0`（18+12+15） |
+| `node --test test/*.test.mjs` | 1 | `ℹ tests 1195 / pass 1194 / fail 1`；唯一失败 `db migrations, dictionaries and task tree` 为**清理期 EPERM**（既有问题，`docs/releases/v1.16.0.md:134`） |
+| 独立证据 `evidence/p5-http-e2e.mjs` | 0 | `P5 HTTP 端到端证据：38/38 PASS，响应样本 23 条` |
+| `pnpm pack`（`prepare` 会重建 lib，单独跑） | 0 | tarball 299 条目；含 `assets/expert-generation/methodology.md` + 全部新 lib 模块 + 3 个 LICENSE |
+
+本批 14 个文件 CR 全 0（LF）；`REVERSE-INJECTION` 在 `src/**`、`test/**` 残留 0。
+
+### 12.2 AX-E31–E35 / E50 对账
+
+| 断言 | 结论 | 证据（测试文件:用例 / 独立证据） |
+|---|---|---|
+| AX-E31 | ✅ 测试内（真实 19387 宿主未跑） | `test/expertRoutes.test.mjs` 非回环 403 / 坏 JSON 400 / 声明超长 413；`test/expertWiring.test.mjs` 真发 300KiB body → 413 且草稿零行；`evidence/p5-http-e2e.mjs` 全链泄漏扫描（无临时根、`install-journal`、`ticket`） |
+| AX-E32 | ✅ | `test/expertRoutes.test.mjs` 旧 version / 错 hash → 409 且正式库零写入；`evidence/p5-http-e2e.mjs` pending 草稿三条负例 + 已确认草稿幂等回放 |
+| AX-E33 | ✅ | `test/expertRoutes.test.mjs` 首次 `replayed:false` → 再次 200 `replayed:true`；旧任务 kind 返回结构不变 |
+| AX-E34 | ✅ | `test/expertTools.test.mjs` 只注册 5 个生成工具、无确认/安装工具、无 `session_id`/`root`/`absolute_path` 参数 |
+| AX-E35 | ✅ | `test/expertRoutes.test.mjs` abandon 只清自己的暂存；installing → 409 且草稿仍 pending；其他草稿不受影响 |
+| AX-E50 | ✅ **仅 fake ctx 内**（真实宿主未跑） | `test/expertWiring.test.mjs` 6 条：inject 逐字未变、一份 service 三处共用、skills 缺失不 pending、子 fiber + effect 范式、live agent 的 scope/cwd 原样传到 `skills.list`、settings POST 真 boolean 恰好转发一次 |
+
+### 12.3 交付物
+
+14 个文件（8 新增 + 6 修改）与逐字导出签名见 `P5-handover.md` §1/§2。
+
+### 12.4 独立证据：真实 HTTP 全链 + 真实 provider 挂载
+
+`docs/tasks/ed644638-…/evidence/p5-http-e2e.mjs`（**不属于仓库测试**）：真实 `http.createServer` + `makeRoutes(db, { experts })` + 真服务（`roots={home:<临时根>}`，与生产 `config.home` 同口径），走完 `capabilities → methodology → generation-start → 5 个工具 → validate → file → confirm → catalog → 再次 confirm → 负例 → abandon`。
+
+三条最有价值的真实行为：①**无 skills 服务时**，受管发布被 `catalog` 真的发现（`source:'user'`、`provenanceState:'recorded'`、`enabled:true`）但如实降级为 `dependency-unavailable` + `skill-service-unavailable`，且不进 `personas` 可选摘要；②把**真实 P4 provider** 包进假 skills 服务后，同一行翻成 `usable`、`requiredSkills[0].available===true`、`preliminary===true`（无 live agent ⇒ 不假装已按 scope 仲裁），`preflight.usable===true`；③AX-E32 的"旧 version → 409"必须打在 **pending** 草稿上——已确认草稿的 confirm 走**幂等回放**（`src/experts/install.ts:1407-1413`，replay 优先于版本校验，这是设计）。
+
+### 12.5 规格偏差、复核与修复
+
+7 条规格偏差逐条列在 `P5-handover.md` §7（其中 ②`validateDraft` 第三参、③`Config.home`、⑥把 P1/P3 缺口在接线层补偿，明确标注为**子代理/主会话的判断偏差**）。
+
+主会话逐文件复核后发出 3 处修复请求并已落地：①preflight 回调漏传 `exec` → 永远无 scope 全局视角（真问题，+11 行 + 反向注入）；②`setAutoEnabled` 转发只靠源码扫描 → 改可注入桩断言；③413 只靠声明式长度 → 补真发超限 body 用例。修复轮后 `tests 330 / pass 330 / fail 0`，反向注入（接线点传 `undefined`）→ `tests 8 / pass 7 / fail 1`（`actual: undefined` vs `expected: {label:'wiring-agent-scope'}`），还原后全绿。
+
+### 12.6 未验证项（如实标注，不填通过）
+
+8+1−1 条见 `P5-handover.md` §8，其中与 §12.2 直接相关的是：**真实 19387 宿主实例未跑**（未重启、未装盘，需用户明确授权）、**真实宿主 skills 服务未跑**（全程 fake/桩）、**"最近层同名技能胜出"的合并语义未在真实注册表验证**（只证明了 scope/cwd 原样传入）。
