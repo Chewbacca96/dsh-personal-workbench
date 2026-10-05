@@ -67,9 +67,9 @@
 | AX-E57 | P8 / browser | 开关保存失败、外部目录改动、收藏/停用 | 开关回滚并显示错；外部目录保存规则和 flag 立即保存保留 |
 | AX-E58 | P8 / regression | task/knowledge/report/review 草稿与普通 persona | 旧确认、提醒、选择、绑定不回归；WorkbenchApp 不接业务 state/请求 |
 | AX-E59 | P9 / package | 新 tarball 解包检查 | 有方法论/新 lib/旧 personas/license；无 .pending、用户数据、TEMP |
-| AX-E60 | P9 / real LLM | 独立会话原创专家生成 | 实际生成工具提交、校验；用户确认前正式库为空 |
-| AX-E61 | P9 / real LLM | 父绑定 A，用户 @ B 且 auto=false | 实际 run request → B child loader → B 结果；父仍 A |
-| AX-E62 | P9 / real LLM | auto=true 自主调用后关闭再发一轮 | 实际自主工具调用、真实结果；下一轮关闭后无 schema/prompt |
+| AX-E60 | P9 / 真实会话通道 | 独立会话原创专家生成 | 实际生成工具提交、校验；用户确认前正式库为空 |
+| AX-E61 | P9 / 真实会话通道 | 父绑定 A，用户 @ B 且 auto=false | 实际 run request → B child loader → B 结果；父仍 A |
+| AX-E62 | P9 / 真实会话通道 | auto=true 自主调用后关闭再发一轮 | 实际自主工具调用、真实结果；下一轮关闭后无 schema/prompt |
 
 ## 2. 最低夹具
 
@@ -88,6 +88,7 @@
 
 - 每行记录 pass / fail / unverified / blocked、命令、退出码和证据路径，不以“文件写好了”代替 pass。
 - 单元通过只能覆盖其层级。真实 SDK 和真实模型断言必须分别有证据。
+- 本文的「真实模型」指**目标实例里真实 DSH 会话中的模型**：由 `session/create` + `session/prompt` 驱动（生成入口见 `src/client/hooks/useWorkbenchExperts.ts:746`、`:789-792`），再由该会话的 AI 调用插件工具（`src/experts/tools.ts:559-576`）。本插件**从不直接调用模型**（既有口径见 `方案-v0.2.md:120`）；所以「模型链路未验证」说的是"没在真实会话里跑通"，**不是**"少接了一个 LLM 接口"。
 - 正式功能验收不允许把 AX-E60–E62 的未运行当作通过；环境缺失时可以交付实现供审阅，但说明未完成模型链路验证。
 - 测试故障恢复不可只检查错误字符串，还要重读 DB、FS、discovery 和 provider。
 - 浏览器验收不可只看 toast，必须 GET 重读真实状态并核对安装文件。

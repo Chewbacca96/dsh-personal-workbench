@@ -315,19 +315,19 @@ node --test test/expertClientFlow.test.mjs test/clientInvariants.test.mjs test/c
 
 交接：具体 UI DOM 入口、错误提示、创建/确认 payload，不能只给截图而缺 HTTP 重读。
 
-## P9 — 完整验证、打包与真实模型链路
+## P9 — 完整验证、打包与真实会话链路（模型在 DSH 会话里跑）
 
 前置：P8 通过。本期出口批次。
 
 1. pnpm test 完整回归；新增失败不能通过删老测试消除。
 2. tarball 核验 methodology、新 lib、原 persona 和许可都在；不包含 .pending、测试数据、TEMP 证据。
-3. 新建 scripts/verify/suites/expert.mjs；用既有 _harness.mjs，登记 suites.json 为 active/required。真实模型独立证据，不新增隐式 skip 白名单。
+3. 新建 scripts/verify/suites/expert.mjs；用既有 _harness.mjs，登记 suites.json 为 active/required。模型层证据必须来自**目标实例里真实跑起来的一次 DSH 会话**（会话日志里的真实工具调用 + 目标库/正式根状态），不新增隐式 skip 白名单。
 4. 先 dry-run 隔离研发验收链，核对不是当前实例；再在已有授权的测试范围执行。未知 profile/db 不从猜测值启动。
 5. 实际浏览器完成 AX-E52–E58；取 DOM + HTTP + FS/DB 结果。
 6. 在隔离实例做一次 original 生成，再做一次能取得 MIT 原件的生成；网络失败记录真实失败，不能将 original 兜底冒充 MIT 取件成功。
 7. 同父会话先绑专家 A，再 @ 专家 B：观察 B 子代理调用专用 loader、输出、父绑定保持 A。
 8. auto=false 下手动通过；auto=true 下模型自主调用；关闭后 schema/prompt 下一轮消失。
-9. 按 verification 的层级记录；没跑真实 LLM 就声明实现检查通过但模型链路未验证。
+9. 按 verification 的层级记录；没在真实 DSH 会话里跑通模型链路，就声明实现检查通过但模型链路未验证（本插件的生成通道是**新建独立 DSH 会话并把请求当普通消息发进去**，插件自身从不直接调用模型）。
 10. 人工复核后才把 ADR 状态从 proposed 改 accepted；发布另按项目既有授权。
 
 命令：

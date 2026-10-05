@@ -378,6 +378,49 @@ export function hasSessionCreate(runtime: unknown): boolean {
 const EXPERT_PHASES: readonly ExpertDraftPhase[] = ['editing', 'validated', 'installing', 'install-failed']
 
 /**
+ * 把服务端专家草稿的响应**归一化**成流程内部统一使用的 `DraftView` 形状（`id` + `payload`）。
+ *
+ * 为什么必须有这一层：专家域三件套返回的是 `ExpertDraftView`（**平铺**：`draftId` 在顶层，
+ * `contentVersion` / `phase` / `validation` / `files` 也都在顶层），而通用草稿接口
+ * （`/api/workbench/drafts*`）返回的是 `DraftView`（`id` + `payload` 嵌套）。本流程内部
+ * 一律按 `DraftView` 读写（`draft.id`、`readExpertDraftPayload(draft)` 读 `draft.payload`），
+ * 所以两种形状进来都必须先归一化 —— 否则读不到草稿、流程会在拿到草稿之后停住。
+ * （2026-10-05 P10 真机验收抓到：`generation-start` 之后第 7 步必失败、提示词永不发出。）
+ *
+ * 服务端真实形状的出处（改这里之前先看这几处，别只信本注释）：
+ * - `src/experts/drafts.ts:156-168` `ExpertDraftView`：平铺字段 + `draftId`，**没有 `id`**；
+ * - `src/api/routes/experts.ts:84` generation-start → `{ ok, draft: ExpertDraftView }`；
+ * - `src/api/routes/experts.ts:123-139` `GET drafts/:id` 与 `drafts/:id/validate` → 同样是平铺视图；
+ * - `src/shared/contracts.ts:116-128` 通用 `DraftView`：`id` + `payload`。
+ *
+ * 两种形状都认：已经带 `id` + `payload` 的直接放行（专家草稿横幅那条路径给的就是它）；
+ * 平铺视图补出 `id`（= `draftId`）、把整份平铺字段放进 `payload`。两个形状都不是就返回
+ * `null`，由调用点给稳定 code —— **不猜、不静默降级**。
+ */
+export function normalizeExpertDraftResponse(raw: unknown): DraftView | null {
+  if (raw === null || raw === undefined || typeof raw !== 'object') return null
+  const record = raw as Record<string, unknown>
+  // 通用草稿形状：`id` + `payload` 都在，直接用。
+  if (typeof record.id === 'string' && record.payload !== null && typeof record.payload === 'object') {
+    return record as unknown as DraftView
+  }
+  // 专家域平铺视图：认 `draftId`，其余字段整体进 `payload`。
+  const draftId = typeof record.draftId === 'string' ? record.draftId.trim() : ''
+  if (draftId === '') return null
+  return {
+    id: draftId,
+    kindCode: 'expert',
+    sessionId: null,
+    payload: record,
+    statusCode: typeof record.statusCode === 'string' ? record.statusCode : '',
+    deferredAt: null,
+    deferCount: 0,
+    createdAt: '',
+    updatedAt: '',
+  }
+}
+
+/**
  * 从 `DraftView.payload` 里**防御性**读出专家草稿 payload。
  *
  * 为什么不信服务端形状：草稿 payload 是 JSONB，历史行/半写行都可能缺字段；
@@ -764,15 +807,17 @@ export function createExpertGenerationRunner(deps: ExpertFlowDeps): ExpertGenera
           // 7. 登记草稿
           let draft: DraftView
           try {
-            const res = await deps.call<{ draft?: DraftView }>(EXPERTS_GENERATION_START_PATH, {
+            const res = await deps.call<{ draft?: unknown }>(EXPERTS_GENERATION_START_PATH, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ sessionId, request, workspaceId }),
             })
-            draft = res.draft as DraftView
-            if (draft === null || draft === undefined || typeof draft.id !== 'string') {
+            // 服务端这里回的是平铺的 `ExpertDraftView`（`draftId` 在顶层）→ 先归一化再判。
+            const normalized = normalizeExpertDraftResponse(res?.draft)
+            if (normalized === null) {
               return fail('generation-start-failed', '服务端没有返回草稿，已停止（草稿可在待处理里找回或重试）。', { sessionId })
             }
+            draft = normalized
           } catch (error) {
             return fail('generation-start-failed', `登记生成草稿失败：${errorText(error)}。已有会话与内容都还在。`, { sessionId })
           }
@@ -854,12 +899,13 @@ export function createExpertDraftOps(deps: ExpertFlowDeps): ExpertDraftOps {
         return { ok: false, code: 'install-in-progress', message: '正在安装，等它结束再校验。', draft: null, problems: [] }
       }
       try {
-        const res = await deps.call<{ draft?: DraftView }>(expertDraftValidatePath(draft.id), {
+        const res = await deps.call<{ draft?: unknown }>(expertDraftValidatePath(draft.id), {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ expectedVersion: read.payload.contentVersion }),
         })
-        const next = (res.draft ?? null) as DraftView | null
+        // validate 同样回平铺视图（`draftId` + 顶层 `validation`）→ 归一化后再读 payload。
+        const next = normalizeExpertDraftResponse(res?.draft)
         const nextRead = readExpertDraftPayload(next)
         const problems = nextRead.ok ? (nextRead.payload.validation?.errors ?? []).map((issue) => issue.message) : []
         return {
@@ -938,9 +984,9 @@ export function createExpertDraftOps(deps: ExpertFlowDeps): ExpertDraftOps {
 /** 读一次最新草稿（版本冲突判定与"刷新预览"都用它）；失败返回 null，不抛。 */
 async function readLatestDraft(deps: ExpertFlowDeps, draftId: string): Promise<DraftView | null> {
   try {
-    const res = await deps.call<{ draft?: DraftView }>(expertDraftDetailPath(draftId))
-    const draft = res?.draft
-    return draft === null || draft === undefined ? null : draft
+    const res = await deps.call<{ draft?: unknown }>(expertDraftDetailPath(draftId))
+    // `GET /experts/drafts/:id` 回的也是平铺视图（`draftId`）→ 归一化。
+    return normalizeExpertDraftResponse(res?.draft)
   } catch {
     return null
   }

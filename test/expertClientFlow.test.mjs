@@ -47,12 +47,15 @@ import {
   hasSessionCreate,
   isExpertDraft,
   matchWorkspaceForCwd,
+  normalizeExpertDraftResponse,
   readExpertDraftPayload,
   readExpertInstalledFromOutcome,
   readExpertPreflight,
   refreshExpertCatalogAfterInstall,
   safeSourceKeyLabel,
 } from '../lib/client/hooks/useWorkbenchExperts.js'
+// 服务端**真实**形状的生产者：假响应必须由它生成，不许手搓（见 makeServerExpertDraftView）。
+import { expertDraftView } from '../lib/experts/drafts.js'
 import { SESSION_OPEN_UNAVAILABLE } from '../lib/client/sessionRef.js'
 import { read, stripComments, countInClient, assertClientCount } from './_clientSources.mjs'
 
@@ -125,6 +128,23 @@ function makeValidatedDraft(overrides = {}) {
       },
       ...overrides,
     }),
+  })
+}
+
+/**
+ * **服务端真实形状**：专家域只读视图（平铺 `draftId`，**没有** `id` / `payload`）。
+ *
+ * 关键：用产品自己的 `expertDraftView()`（`src/experts/drafts.ts:1388`）生成，而不是手搓。
+ * 手搓的假响应只能证明"客户端和自己造的假数据一致"，照不到真实契约
+ * —— 2026-10-05 P10 真机验收就是这么抓到 P8 的 `draft.id` / `draftId` 错配的
+ * （点「开始生成」后第 7 步必失败、提示词永不发出，而 1289 条测试全绿）。
+ * 服务端哪天再改字段名，这里跟着改，客户端读不出来会立刻变红。
+ */
+function makeServerExpertDraftView(payloadOverrides = {}) {
+  return expertDraftView({
+    id: 'draft-1',
+    statusCode: 'pending',
+    payload: makePayload(payloadOverrides),
   })
 }
 
@@ -243,7 +263,7 @@ function makeDeps(host, call, extra = {}) {
 }
 
 /** 生成流程的默认假服务端（能力 + 方法论 + 登记草稿都成功）。 */
-function generationHandlers(draft = makeDraft()) {
+function generationHandlers(draft = makeServerExpertDraftView()) {
   return {
     [EXPERTS_CAPABILITIES_PATH]: { ok: true, generation: { available: true }, skills: { available: true }, manualSummon: { available: true }, autoSummon: { available: true, enabled: false }, providerName: 'skills' },
     [EXPERTS_METHODOLOGY_PATH]: { ok: true, version: 1, text: '# 方法论\n1. 先问清用途\n2. 再写人格文档' },
@@ -448,7 +468,7 @@ test('AX-E53 isAlive 变假（面板已关）时中止：未取引用就中止�
     ...generationHandlers(),
     [EXPERTS_GENERATION_START_PATH]: () => {
       alive = false
-      return { ok: true, draft: makeDraft() }
+      return { ok: true, draft: makeServerExpertDraftView() }
     },
   })
   const deps = { ...makeDeps(host, http.call), isAlive: () => alive }
@@ -545,12 +565,11 @@ test('AX-E54 版本/阶段对不上时**不发请求**（防止"确认的不是�
 test('AX-E54 校验 body 恰好 { expectedVersion }，校验问题回传成可读中文', async () => {
   const host = makeHost()
   const draft = makeDraft()
-  const nextDraft = makeDraft({
-    payload: makePayload({
-      contentVersion: 2,
-      phase: 'editing',
-      validation: { version: 2, manifestHash: 'hash-v2', checkedAt: 'x', errors: [{ code: 'persona-md-missing', field: 'personaMd', message: '缺少人格文档正文' }], warnings: [] },
-    }),
+  // 服务端回的是平铺视图（`draftId` 在顶层）——真实形状由产品自己的 expertDraftView() 生成。
+  const nextDraft = makeServerExpertDraftView({
+    contentVersion: 2,
+    phase: 'editing',
+    validation: { version: 2, manifestHash: 'hash-v2', checkedAt: 'x', errors: [{ code: 'persona-md-missing', field: 'personaMd', message: '缺少人格文档正文' }], warnings: [] },
   })
   const http = makeCall({ [expertDraftValidatePath('draft-1')]: { ok: true, draft: nextDraft } })
   const ops = createExpertDraftOps(makeDeps(host, http.call))
@@ -592,14 +611,12 @@ test('AX-E54 专家草稿横幅不出现"创建任务"（源码级：四态按�
 
 test('AX-E55 确认时服务端已经往前走了一版：版本冲突 → 刷新预览，且**没有**第二次确认', async () => {
   const host = makeHost()
-  // 服务端那一份已经走到 v2（AI 又改过一版）——注意必须直接构造 payload，
+  // 服务端那一份已经走到 v2（AI 又改过一版）——**直接构造真实形状**：
   // 不能把 { payload } 传给 makeValidatedDraft（那样会展开成 payload.payload，等于没改版本）。
-  const serverDraft = makeDraft({
-    payload: makePayload({
-      contentVersion: 2,
-      phase: 'editing',
-      validation: { version: 1, manifestHash: 'hash-v1', checkedAt: 'x', errors: [], warnings: [] },
-    }),
+  const serverDraft = makeServerExpertDraftView({
+    contentVersion: 2,
+    phase: 'editing',
+    validation: { version: 1, manifestHash: 'hash-v1', checkedAt: 'x', errors: [], warnings: [] },
   })
   const http = makeCall({
     [expertDraftConfirmPath('draft-1')]: () => { throw new Error('HTTP 409（草稿版本冲突）') },
@@ -623,7 +640,11 @@ test('AX-E55 确认失败但不是版本冲突：按普通失败返回，仍不�
   const host = makeHost()
   const http = makeCall({
     [expertDraftConfirmPath('draft-1')]: () => { throw new Error('网络断了') },
-    [expertDraftDetailPath('draft-1')]: { ok: true, draft: makeValidatedDraft(), drift: null },
+    [expertDraftDetailPath('draft-1')]: {
+      ok: true,
+      draft: makeServerExpertDraftView({ phase: 'validated', validation: { version: 1, manifestHash: 'hash-v1', checkedAt: 'x', errors: [], warnings: [] } }),
+      drift: null,
+    },
   })
   const ops = createExpertDraftOps(makeDeps(host, http.call))
   const outcome = await ops.confirm(makeValidatedDraft())
@@ -1015,4 +1036,75 @@ test('AX-E58 管理页空目录/纯函数不会崩（EMPTY_EXPERT_CATALOG 基线
   assert.deepEqual(expertAdminRows(EMPTY_EXPERT_CATALOG, '', 'all'), [])
   assert.deepEqual(expertPickerPersonas(EMPTY_EXPERT_CATALOG), [])
   assert.equal(expertRowView(makeRow()).selectable, true)
+})
+
+// ---------------------------------------------------------------------------
+// P11：服务端真实形状回归（2026-10-05 P10 真机验收抓到的 P8 契约错配）
+//
+// 专家域三件套回的是**平铺** `ExpertDraftView`（`draftId` 在顶层），而流程内部按通用
+// `DraftView`（`id` + `payload`）读写。P8 的假响应是手搓的通用形状 ⇒ 全仓 1289 条测试
+// 全绿，真机一跑却是"点开始生成没反应"（第 7 步必失败、提示词永不发出）。
+// 下面把两种形状都钉住：**假响应必须由产品自己的 `expertDraftView()` 造**。
+// ---------------------------------------------------------------------------
+
+test('P11 normalizeExpertDraftResponse：两种真实形状都认，其它一律 null（不猜）', () => {
+  const generic = makeDraft()
+  assert.equal(normalizeExpertDraftResponse(generic), generic, '通用草稿形状（id + payload）原样放行')
+
+  const flat = makeServerExpertDraftView()
+  assert.equal('id' in flat, false, '前提：服务端平铺视图里没有 id')
+  assert.equal(typeof flat.draftId, 'string')
+  const normalized = normalizeExpertDraftResponse(flat)
+  assert.equal(normalized.id, 'draft-1', 'id 必须来自 draftId')
+  assert.equal(normalized.kindCode, 'expert')
+  assert.equal(normalized.payload.contentVersion, 1, '平铺字段整体进 payload')
+  assert.equal(normalized.statusCode, 'pending', 'statusCode 是平铺字段，要认')
+  assert.equal(readExpertDraftPayload(normalized).ok, true)
+
+  assert.equal(normalizeExpertDraftResponse(null), null)
+  assert.equal(normalizeExpertDraftResponse(undefined), null)
+  assert.equal(normalizeExpertDraftResponse({}), null, '两个形状都不是 → null，不许瞎认')
+  assert.equal(normalizeExpertDraftResponse({ draftId: '   ' }), null)
+  assert.equal(normalizeExpertDraftResponse('draft-1'), null)
+  assert.equal(normalizeExpertDraftResponse({ id: 'draft-1', payload: null }), null, '有 id 但 payload 不成形状不算通用草稿')
+})
+
+test('P11 回归（P0）：generation-start 回平铺视图时，生成流程必须继续到发出提示词', async () => {
+  const host = makeHost()
+  const http = makeCall(generationHandlers())
+  const runner = createExpertGenerationRunner(makeDeps(host, http.call))
+
+  const outcome = await runner.start({ request: '一个会写周报的专家', workspaceId: 'ws-1' })
+
+  assert.equal(outcome.ok, true, '平铺视图必须被认出来，不能停在 generation-start-failed')
+  assert.equal(outcome.code, null)
+  assert.equal(outcome.draftId, 'draft-1')
+  assert.equal(outcome.promptSent, true, '第 9 步的提示词必须真的发出去（这正是 P10 真机抓到的症状）')
+  assert.equal(host.state.prompts.length, 1)
+  assert.equal(readExpertDraftPayload(outcome.draft).ok, true, '归一化之后 payload 必须读得出来')
+})
+
+test('P11 回归：validate / 重读草稿同样认平铺视图（否则校验后确认读不出草稿、版本冲突认不出来）', async () => {
+  const host = makeHost()
+  const serverNext = makeServerExpertDraftView({
+    contentVersion: 2,
+    phase: 'validated',
+    validation: { version: 2, manifestHash: 'hash-v2', checkedAt: 'x', errors: [], warnings: [] },
+  })
+
+  const validateHttp = makeCall({ [expertDraftValidatePath('draft-1')]: { ok: true, draft: serverNext } })
+  const validated = await createExpertDraftOps(makeDeps(host, validateHttp.call)).validate(makeDraft())
+  assert.equal(readExpertDraftPayload(validated.draft).ok, true, 'validate 回来的平铺视图必须读得出 payload')
+  assert.equal(validated.draft.payload.contentVersion, 2)
+
+  // 确认失败后"是不是版本冲突"的判定，全靠 GET drafts/:id 能读出 contentVersion。
+  const confirmHttp = makeCall({
+    [expertDraftConfirmPath('draft-1')]: () => { throw new Error('HTTP 409（草稿版本冲突）') },
+    [expertDraftDetailPath('draft-1')]: { ok: true, draft: serverNext, drift: [] },
+  })
+  const conflict = await createExpertDraftOps(makeDeps(host, confirmHttp.call)).confirm(makeValidatedDraft())
+  assert.equal(conflict.code, 'version-conflict', '平铺视图读得出 contentVersion 才认得出冲突')
+  assert.equal(readExpertDraftPayload(conflict.refreshed).ok, true)
+  assert.equal(conflict.refreshed.payload.contentVersion, 2)
+  assert.equal(confirmHttp.count(expertDraftConfirmPath('draft-1')), 1, '仍然只确认一次，不自动重放')
 })

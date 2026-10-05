@@ -11,22 +11,25 @@
  * | U/N（包与静态） | AX-E59 | 本次链真实打包出来的 tgz：方法论 / 新 `lib/**` / 内置 personas / 许可都在；`.pending`、测试数据、TEMP 证据、绝对路径**都不在** |
  * | H（真实 HTTP） | AX-E60 前半 + AX-E52–E58 的接线面 | 隔离实例的真实 SQLite + 真实文件系统：capabilities / methodology / catalog / generation-start / validate / confirm / abandon / manual-requests / preflight |
  * | B（真实浏览器） | AX-E52–E58 | 真实鼠标点「新建专家」、读 `data-wb-expert-*` 实际渲染值、开关、降级 |
- * | M（真实模型） | AX-E60/E61/E62 后半 | 需要一条真实模型链路；拿不到就**如实 skip**（required+skipped 由链判不通过），绝不写成 pass |
+ * | B（真实浏览器 + 真实会话记录） | AX-E60/E61/E62 | 真浏览器走 UI 开生成会话 + 读 `~/.dsh/sessions/**` 的 JSONL（多帧 zstd 逐帧解压）判"模型真调了哪些工具" + 目标库复读草稿行；拿不到就**如实 skip**（required+skipped 由链判不通过），绝不写成 pass |
  *
  * ## 本套件不新增任何隐式 skip 白名单
  *
- * `skipped` 只出现在 **M 层**（真实模型链路），且 reason 逐条写清。U/H/B 三层找不到前置
- * 一律走 `suite.require()`（记 **fail**，不是 skip）。`total <= 0` 由链判失败，本套件也自检。
+ * `skipped` 只出现在**真实模型链路**那几条（AX-E60/E61/E62 的模型后半），且 reason 逐条写清**具体阻塞
+ * 原因 + 收集到的原始证据**。U/H/B 三层找不到前置一律走 `suite.require()`（记 **fail**，不是 skip）。
+ * `total <= 0` 由链判失败，本套件也自检。
  *
  * 用法（链自己会拼）：
  * ```sh
  * node scripts/verify/suites/expert.mjs --url <目标> --evidence-dir <本次证据目录> --user-data-root <临时浏览器根>
  * ```
  */
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { zstdDecompressSync } from 'node:zlib'
 
 import {
   CHECK_LAYERS,
@@ -49,6 +52,16 @@ const AX = ['AX-E59', 'AX-E60', 'AX-E61', 'AX-E62']
 /** P8 遗留的 B 层（AX-E52–E58：DOM + 真实点击）。它们与 E59–E62 同属本套件。 */
 const P8_AX = ['AX-E52', 'AX-E53', 'AX-E54', 'AX-E55', 'AX-E56', 'AX-E57', 'AX-E58']
 const ROOT = repoRootFromSuite()
+/**
+ * ⚠️ 会话目录的项目键有**前后各两条横线**（实测 `--D-Code-Linksight-dsh-workbench--`）。
+ * 映射规则（P10 实测反推）：路径里的 **`:` 直接删掉**（盘符不占位），`\` 与 `.` 换成 `-`，
+ * 再在两端各加 `--`。`repoRootFromSuite()` 返回的路径还带**尾部分隔符**，所以先去尾部斜杠。
+ * 两处都坑过 P10 的中间几次单跑（键算错 ⇒ `startsWith` 恒假 ⇒ 所有新会话都判成"不是这个仓库的"，
+ * 白等满 180s 预算）：尾斜杠 ⇒ `---` 结尾；`:` 也变 `-` ⇒ `--D--Code-…`。
+ */
+const ROOT_TRIMMED = ROOT.replace(/[\\/]+$/, '')
+const ROOT_PROJECT_KEY = `--${ROOT_TRIMMED.replace(/[:\\/]/g, (char) => (char === ':' ? '' : '-')).replace(/\./g, '-')}--`
+const ROOT_NORM = ROOT_TRIMMED.replace(/\\/g, '/').toLowerCase()
 
 const suite = startSuite({
   id: 'expert',
@@ -96,6 +109,12 @@ let browser
  * 漏一份 pending 专家草稿，横幅就会在**后续套件**的鼠标点击上盖一层浮层。
  */
 let cleanupDraftId
+/**
+ * 浏览器可执行文件的发现结果（`checkBrowserLayer` 填）。B 层末尾要**关掉当前实例再冷启动一个新的**
+ * 才能换会话（见 `runExpertGenerationProbe` 的注释：只有全新进程冷启动才会让 SPA 把
+ * `dsh.sessions.current` 解析成最新那个会话），重启动时必须复用同一个浏览器路径。
+ */
+let BROWSER_PATH = null
 
 /** 层是否被登记过（`CHECK_LAYERS` 是全仓唯一口径：U/H/W/B/N）。 */
 const layerOk = (layer) => CHECK_LAYERS.has(layer)
@@ -675,6 +694,7 @@ async function checkBrowserLayer() {
     return
   }
   browser = await launchSuiteBrowser({ url: options.url, token: options.token, userDataRoot: options.userDataRoot, browserPath: discovered.path })
+  BROWSER_PATH = discovered.path
   await browser.goto(api.pageUrl())
   await waitFor(async () => (await browser.evaluate(`return document.querySelector('[class*="sidebarCol"]') !== null;`)) === true, { timeoutMs: 30000, description: '宿主侧栏渲染' }).catch(() => undefined)
   await sleep(1500)
@@ -906,153 +926,1230 @@ async function checkBrowserLayer() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// M：真实模型（AX-E60/E61/E62 的后半）
+// M/B：真实模型（AX-E60/E61/E62）—— **走真实 DSH 会话通道**
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * 真实模型链路。
+ * 本层的通道口径（P10 定案；P11 修掉了"产品自己不派发"的缺陷，见 `runExpertGenerationProbe()` 里
+ * "P11 判据核心"那段注释）。
  *
- * ## 判据只能来自宿主侧的真实记录
+ * 「生成专家」**不是**插件直接调 LLM：插件客户端新建一个**独立 DSH 会话**
+ *（`src/client/hooks/useWorkbenchExperts.ts:746` 的 `sessions.create({ workspaceId })`），
+ * 把插件自己构造的 prompt（`:630-645`）当**普通用户消息**发进去（`:789-792`
+ * `session.prompt([...], 'queue')`），生成会话**自己的 AI** 再调用插件注册的 5 个草稿工具
+ *（`src/experts/tools.ts:559-576`）。所以模型层只能这么验：
  *
- * 这一步要求观察到**模型真的调用了专家工具**（`workbench_submit_expert_draft` 一族 /
- * `run_expert_request` / `summon_expert`）。我们能诚实拿到的宿主侧证据只有两处：
+ * 1. 真浏览器走 UI 把生成会话**开出来**（真实的 `sessions.create` + 真实的 generation-start）；
+ * 2. 从 `~/.dsh/sessions/<项目键>/<sessionId>/session.v*.jsonl.zstd` 读**真实会话记录**：
+ *    `user/message`（prompt 真的发出去了）、`request/header.data.header.tools[]`（模型**真的**被
+ *    给了这 5 个工具）、`tool/call`（模型**真的**调了它们）；
+ * 3. 目标库（隔离 `verify.db`）复读该草稿行：`contentVersion` / `phase` / `validation` /
+ *    `session_id`；
+ * 4. 正式角色库（用户 personas 根）在**确认前**不许出现这个 expertId。
  *
- * 1. **DB 里的专家草稿行**：模型调了生成工具 → 会为该会话建/更新一份草稿。
- *    `generation-start`（HTTP）也会建草稿，所以判据是"**模型会话 id** 名下的草稿"，
- *    而不是"有一份草稿"。
- * 2. **会话记录里出现工具名**：DSH 的会话日志按 zstd 压缩时无法按文本扫描（`persona.mjs`
- *    已记这条），所以它只作**加分项**、不作必要条件。
- *
- * 拿不到真实模型时**如实 skip**（`skipped: true` + reason）—— 链把 required+skipped
- * 判成不通过，这正是"不许假装通过"。
+ * 三条硬纪律：
+ * - **禁止**换假 provider / 伪造模型响应 / 新增隐式 skip 白名单；
+ * - 拿不到时如实 `skipped` + **具体阻塞原因 + 收集到的原始证据**，绝不假通过；
+ * - 真实模型调用**每次运行 ≤ 6 次**（`MODEL_CALL_BUDGET`），每次都记耗时与结果。
  */
-async function tryObserveModelToolCalls() {
-  const findings = { probed: [], hits: [], notes: [] }
-  /**
-   * 造一条**真实模型会话**的能力探测。
-   *
-   * ⚠️ 2026-10-05 实测结论：本机 `headless` 是 **profile 名**（`dsh --profile headless "任务"`），
-   * 不是 web profile 的子命令 —— `dsh --profile web headless --json …` 会被 web app 当成
-   * 普通 app 参数解析（`error: unknown option '--json'`）。所以这条探测在当前环境下
-   * **必然拿不到工具调用**，它只在"将来本机有了可用的 headless 入口"时才有意义。
-   * 要不要真跑由 `DSH_VERIFY_EXPERT_MODEL` 决定（默认 **不跑**：验收链的预算与费用
-   * 不由套件擅自决定）；跑不通时如实报**具体原因**，绝不伪造。
-   */
-  /**
-   * ⚠️ 2026-10-05 修（口径，比第一版更严）：**不设开关、默认就去尝试**。
-   * 第一版写成"`DSH_VERIFY_EXPERT_MODEL !== '1'` 就直接返回未开启"，等于用一个环境变量
-   * 把必需套件里最关键的模型层**静默关掉** —— P9 明令「不允许新增隐式 skip 白名单」，
-   * 默认关就是把"未验证"伪装成"配置没打开"。
-   * 现在只有**根本发不了车**才提前返回（没给目标 profile / 找不到 dsh bin），
-   * 其余一律真的 spawn 一次，把退出码 + stderr 当证据（退出码 1 与 stderr 会写进 reason 与证据文件）。
-   * `DSH_VERIFY_EXPERT_MODEL` 仍然记录，但**不再决定跑不跑**，只作为现场标注。
-   */
-  const requested = process.env.DSH_VERIFY_EXPERT_MODEL === '1'
-  findings.notes.push(`DSH_VERIFY_EXPERT_MODEL=${requested ? '1' : '未设置'}（本层不再由它决定跑不跑，只记录现场）`)
-  const { spawn } = await import('node:child_process')
-  const binCandidates = [
-    join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
-    join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), '..', 'npm', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
-  ]
-  const bin = binCandidates.find((candidate) => candidate !== '' && existsSync(candidate))
-  if (bin === undefined) {
-    return { ok: false, reason: `找不到 dsh 的 bin.js（探测过 ${binCandidates.join('、')}）`, findings }
+
+/** 真实模型调用的硬预算（本批口径 ≤6 次/次运行）。 */
+const MODEL_CALL_BUDGET = 6
+
+/**
+ * 5 个专家生成工具的**权威名字**（口径唯一来源：`src/experts/tools.ts:570-576` 的
+ * `EXPERT_GENERATION_TOOL_NAMES`）。刻意在套件里再抄一份而**不 import 产品源码**：
+ * 判据要能独立失败 —— 哪天源码改了工具名而套件没跟上，实测的 `request/header` 清单对不上就会红。
+ */
+const EXPERT_GENERATION_TOOL_NAMES = [
+  'workbench_get_expert_draft',
+  'workbench_submit_expert_draft',
+  'workbench_stage_expert_file',
+  'workbench_remove_expert_staged_file',
+  'workbench_validate_expert_draft',
+]
+
+/** 本层真的发出了几次 prompt（只有它是预算依据；读 DB / 读 JSONL 不算）。 */
+let modelCallsMade = 0
+const modelCallLog = []
+
+/** 发送一次真实 prompt，记耗时与结果（预算超了就拒绝发送并返回 null）。 */
+async function sendModelMessage(sessionId, text, label) {
+  if (modelCallsMade >= MODEL_CALL_BUDGET) {
+    suite.note(`真实模型调用预算已用尽（${MODEL_CALL_BUDGET} 次），跳过「${label}」`)
+    return null
   }
-  const task = [
-    `这是研发验收的一次真实模型探测（runId=${runId}）。`,
-    '请只做一件事：调用工作台的专家草稿生成工具，为「只回答『就绪』的验证用专家」提交一份草稿。',
-    '不要安装、不要确认发布。做完用一句话说明你调用了哪个工具。',
-  ].join('')
-  const sessionId = `${runId}-model`
-  /**
-   * ⚠️ 2026-10-05 修（这条错会把"模型链路未验证"报成错误的原因）：
-   * 必须用 `options.targetProfile` / `options.targetProfileDir`（**被验收的那个实例**），
-   * 不是 `options.profile`（**当前会话所在实例**，本机是 desktop）。
-   * 首跑用 `options.profile` ⇒ `dsh --profile desktop headless …` 被 CLI 当场拒掉：
-   * `error: profile "desktop" is managed exclusively by the Electron application`
-   *（`_harness.mjs:54-65` 逐字区分了这两组参数）。
-   */
-  const targetProfile = options.targetProfile ?? ''
-  const targetProfileDir = options.targetProfileDir ?? ''
-  if (targetProfile === '') {
-    return { ok: false, reason: '本次没有给出目标 profile（--target-profile），无法在隔离实例上跑真实模型会话', findings }
-  }
-  const result = await new Promise((resolvePromise) => {
-    const child = spawn(process.execPath, [bin, '--profile', targetProfile, 'headless', '--json', '--session-id', sessionId, task], {
-      cwd: ROOT,
-      env: {
-        ...process.env,
-        DSH_PROFILE: targetProfile,
-        DSH_PROFILE_DIR: targetProfileDir,
-        WORKBENCH_PROFILE_DIR: targetProfileDir,
-        WORKBENCH_EXPECTED_DB_PATH: options.dbPath,
-      },
-      windowsHide: true,
-    })
-    let stdout = ''
-    let stderr = ''
-    const timer = setTimeout(() => { try { child.kill() } catch { /* ignore */ } }, 240000)
-    child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
-    child.stderr?.on('data', (chunk) => { stderr += String(chunk) })
-    child.on('error', (error) => { clearTimeout(timer); resolvePromise({ code: 1, stdout, stderr: `${stderr}${String(error)}`, timedOut: false }) })
-    child.on('close', (code) => { clearTimeout(timer); resolvePromise({ code: code ?? 1, stdout, stderr, timedOut: false }) })
-  })
-  const evidenceDir = suite.dir ?? join(tmpdir(), `expert-suite-${runId}`)
-  mkdirSync(evidenceDir, { recursive: true })
-  writeFileSync(join(evidenceDir, 'model-run-stdout.txt'), result.stdout.slice(0, 200000), 'utf8')
-  writeFileSync(join(evidenceDir, 'model-run-stderr.txt'), result.stderr.slice(0, 50000), 'utf8')
-  findings.probed.push({ kind: 'dsh headless', bin, profile: targetProfile, profileDir: targetProfileDir, sessionId, code: result.code, stdoutBytes: result.stdout.length, stderrTail: result.stderr.slice(-400) })
-  const toolNames = ['workbench_submit_expert_draft', 'workbench_stage_expert_file', 'workbench_validate_expert_draft', 'workbench_get_expert_draft', 'run_expert_request', 'workbench_summon_expert']
-  for (const name of toolNames) if (result.stdout.includes(name)) findings.hits.push(name)
-  if (findings.hits.length === 0) {
+  modelCallsMade += 1
+  const startedAt = Date.now()
+  const entry = { label, sessionId, startedAt: new Date(startedAt).toISOString(), ok: false, note: '', typedPrefix: '' }
+  try {
     /**
-     * ⚠️ 2026-10-05 实测：本机 DSH 里 `headless` 是**profile 名**，不是 web profile 的子命令
-     *（`dsh --help` 的 Usage 是 `dsh [--profile] <name> [options] [app-args...]`，
-     *  例子里 `dsh headless "run the tests"` 等价于 `dsh --profile headless …`）。
-     * 所以 `dsh --profile web headless --json …` 实际把 `headless --json …` 当**任务文本**喂给
-     * web app：`--help` 回的是 web UI 的用法，`--json` 直接 `error: unknown option '--json'`。
-     * 结论写进 reason（不写成"模型没调工具"那种会被误读成运行时故障的话）——
-     * 真实模型链路要在**目标实例自己的会话 API**上做（或给 headless profile 叠插件层），
-     * 本次未实现，按规格如实记未验证。
+     * ⚠️ P10 第七次单跑的实际失败点：**光点一下不一定把焦点落到 composer 上**。
+     * 那次 `typedPrefix` 是空串（说明 `Input.insertText` 没有进到输入框），但旧代码照样写
+     * `ok:true` ⇒ 看上去"发出去了"，实际一条消息都没发，白等 600s。
+     * 所以这里每一步都要**验证**：焦点在不在 composer、文本有没有真的进去；失败就如实 `ok:false`
+     * 并把现场写进 `entry.note`（调用方会把它当阻塞原因记 skip，不会假通过）。
      */
-    const stderrTail = result.stderr.trim().split('\n').filter((line) => line.trim() !== '').slice(-2).join(' / ')
+    const box = await browser.evaluate(`
+      const el = document.querySelector('[data-composer-input="true"]');
+      if (el === null) return null;
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), w: Math.round(r.width), h: Math.round(r.height) };
+    `)
+    if (box === null) throw new Error('页面上没有 composer（data-composer-input）')
+    entry.box = box
+    const focusComposer = () => browser.evaluate(`
+      const el = document.querySelector('[data-composer-input="true"]');
+      if (el === null) return { ok: false, reason: 'no-composer' };
+      el.focus();
+      const active = document.activeElement;
+      return { ok: active === el || el.contains(active), activeTag: active === null ? null : active.tagName };
+    `)
+    await browser.clickAt(box.x, box.y)
+    await sleep(400)
+    let focus = await focusComposer()
+    if (focus.ok !== true) {
+      await browser.evaluate(`
+        const el = document.querySelector('[data-composer-input="true"]');
+        if (el !== null) el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        if (el !== null) el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+        if (el !== null) el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        return true;
+      `)
+      await sleep(300)
+      focus = await focusComposer()
+    }
+    entry.focus = focus
+    if (focus.ok !== true) throw new Error(`composer 拿不到焦点（${safeJson(focus)}），insertText 会落空`)
+    await browser.cdp.send('Input.insertText', { text })
+    await sleep(800)
+    const typed = await browser.evaluate(`return (document.querySelector('[data-composer-input="true"]')?.textContent || '');`)
+    entry.typedPrefix = String(typed).slice(0, 60)
+    entry.typedChars = String(typed).length
+    if (String(typed).trim() === '') throw new Error('insertText 之后 composer 仍然是空的（消息根本没写进去）')
+    await browser.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 })
+    await browser.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 })
+    await sleep(1500)
+    const cleared = await browser.evaluate(`return (document.querySelector('[data-composer-input="true"]')?.textContent || '').trim();`)
+    entry.afterSendChars = String(cleared).length
+    entry.ok = true
+    entry.note = `焦点=${String(focus.ok)} 写入=${String(entry.typedChars)} 字符，回车后残留=${String(entry.afterSendChars)} 字符`
+    modelCallLog.push(entry)
+    return entry
+  } catch (error) {
+    entry.ok = false
+    entry.error = error instanceof Error ? error.message : String(error)
+    modelCallLog.push(entry)
+    return entry
+  }
+}
+
+// ── 会话记录的读取（真实证据来源）────────────────────────────────────────────
+
+const SESSIONS_ROOT = join(homedir(), '.dsh', 'sessions')
+
+/** 采集 `~/.dsh/sessions/<项目>/<会话目录>` 的名单（用于判"哪些是新会话"）。 */
+function snapshotSessionDirs() {
+  const found = new Map()
+  if (existsSync(SESSIONS_ROOT) === false) return found
+  for (const project of readdirSync(SESSIONS_ROOT)) {
+    let entries = []
+    try { entries = readdirSync(join(SESSIONS_ROOT, project)) } catch { continue }
+    for (const entry of entries) {
+      const dir = join(SESSIONS_ROOT, project, entry)
+      try { found.set(`${project}/${entry}`, { dir, mtimeMs: statSync(dir).mtimeMs }) } catch { /* 目录刚被清掉就忽略 */ }
+    }
+  }
+  return found
+}
+
+function sessionDirOf(project, entry) {
+  return join(SESSIONS_ROOT, project, entry)
+}
+
+/**
+ * 按**会话 id** 在 `~/.dsh/sessions` 树里找目录（不依赖目录里已经有 JSONL）。
+ *
+ * P10 实测：宿主 `sessions.create()` 会**立刻**建出 `<项目键>/<session-…|uuid>` 目录，但 `session.v4.jsonl.zstd`
+ * 要过一会儿才落盘。所以"草稿行的 `session_id` 在磁盘上有目录"是**比读 JSONL 更早、更稳**的判据；
+ * 目录名有两种写法（`session-<uuid>` 与裸 `<uuid>`）,两种都要认。
+ */
+function sessionDirBySessionId(sessionId) {
+  const needle = String(sessionId ?? '')
+  if (needle === '' || existsSync(SESSIONS_ROOT) === false) return null
+  const bare = needle.startsWith('session-') ? needle.slice('session-'.length) : needle
+  const candidates = [needle, `session-${bare}`]
+  for (const project of readdirSync(SESSIONS_ROOT)) {
+    let entries = []
+    try { entries = readdirSync(join(SESSIONS_ROOT, project)) } catch { continue }
+    for (const entry of entries) {
+      if (candidates.includes(entry) === false) continue
+      const dir = join(SESSIONS_ROOT, project, entry)
+      try { if (statSync(dir).isDirectory()) return dir } catch { /* 刚被清掉就继续找 */ }
+    }
+  }
+  return null
+}
+
+/**
+ * 解压会话 JSONL 并解析成事件数组。
+ *
+ * ⚠️ **多帧 zstd 拼接**是这条路的唯一真实坑（P9 的 `persona.mjs` 只记了"压缩时无法按文本扫描"，
+ * P10 实测出真正的原因与解法）：`session.v4.jsonl.zstd` 是**逐帧追加**的，`zstdDecompressSync(raw)`
+ * 只解第一帧（实测 267KB → 289 字节，只剩 `session` 头）。正确做法是扫 `28 b5 2f fd`（frame magic）
+ * 的偏移逐帧解压再拼。
+ */
+function readSessionEvents(dir) {
+  const files = readdirSync(dir).filter((name) => name.endsWith('.jsonl.zstd'))
+  if (files.length === 0) return { files, bytes: 0, events: [], frames: 0, failedFrames: 0 }
+  const raw = readFileSync(join(dir, files[0]))
+  const offsets = []
+  for (let index = 0; index + 4 <= raw.length; index += 1) {
+    if (raw[index] === 0x28 && raw[index + 1] === 0xb5 && raw[index + 2] === 0x2f && raw[index + 3] === 0xfd) offsets.push(index)
+  }
+  offsets.push(raw.length)
+  let text = ''
+  let failedFrames = 0
+  for (let index = 0; index < offsets.length - 1; index += 1) {
+    try { text += zstdDecompressSync(raw.subarray(offsets[index], offsets[index + 1])).toString('utf8') } catch { failedFrames += 1 }
+  }
+  const events = text.split('\n').filter((line) => line.trim() !== '').map((line) => { try { return JSON.parse(line) } catch { return null } }).filter(Boolean)
+  return { files, bytes: raw.length, events, frames: offsets.length - 1, failedFrames, text }
+}
+
+/** 会话记录的**只读摘要**（写进证据的就是这个，不落全文）。 */
+function sessionSummary(dir) {
+  const read = readSessionEvents(dir)
+  const events = read.events ?? []
+  const head = events.find((event) => event.type === 'session')
+  const header = events.find((event) => event.type === 'request/header')
+  /**
+   * ⚠️ **事件形状不统一**，P10 实测出来的（读错就全是 null，会把"会话建出来了"误判成"没建"）：
+   * - `session` 事件的字段在**事件根上**（`{type,version,id,createdAt,cwd,isSeeded,delegationDepth,agentPreset}`），
+   *   没有 `data`；
+   * - `user/message`、`session/title`、`request/header` 等才把内容放在 `data` 里
+   *   （`request/header` 是 `data.header.tools` / `data.header.config`）。
+   */
+  const calls = events.filter((event) => event.type === 'tool/call').map((event) => ({
+    name: event.data.name,
+    args: String(event.data.arguments ?? '').slice(0, 200),
+    callId: event.data.callId,
+  }))
+  const results = events.filter((event) => event.type === 'tool/result').map((event) => ({ callId: event.data.toolCallId, ok: event.data.message?.isError !== true }))
+  const users = events.filter((event) => event.type === 'user/message').map((event) => ({
+    seq: event.seq,
+    text: (event.data.content ?? []).filter((part) => part.type === 'text').map((part) => part.text).join('').slice(0, 300),
+  }))
+  const titles = events.filter((event) => event.type === 'session/title').map((event) => event.data.title)
+  return {
+    files: read.files,
+    bytes: read.bytes,
+    frames: read.frames,
+    failedFrames: read.failedFrames,
+    events: events.length,
+    typeCounts: events.reduce((accumulator, event) => { accumulator[event.type] = (accumulator[event.type] ?? 0) + 1; return accumulator }, {}),
+    sessionId: head?.id ?? head?.data?.id ?? null,
+    cwd: head?.cwd ?? head?.data?.cwd ?? null,
+    parentSession: head?.parentSession ?? head?.data?.parentSession ?? null,
+    delegationDepth: head?.delegationDepth ?? head?.data?.delegationDepth ?? null,
+    titles,
+    userMessages: users,
+    toolsOffered: header === undefined ? null : header.data.header.tools.map((tool) => tool.name),
+    model: header?.data?.header?.config ?? null,
+    toolCalls: calls,
+    toolResults: results,
+  }
+}
+
+/**
+ * 第一条 `user/message` 的**全文读数**（`sessionSummary` 只取前 300 字，判"是不是产品自己发的那条 prompt"不够）。
+ *
+ * 为什么需要它：P11 的核心判据是「点「开始生成」后**产品自己**把提示词发给模型」。
+ * 提供 `sha256` + 头尾片段，配合 `pluginDispatch.suiteModelCallsAtDetection`（探测到它时套件的
+ * 真实模型调用计数，正常为 0）就能证明**这条消息是产品发的、不是人打的** —— 套件自己没有任何
+ * 手工发送动作，唯一的人手通道是后面的 composer 兜底，而那时 `dispatchPath` 已是 `composer-fallback`。
+ */
+function firstUserMessageFull(dir) {
+  const read = readSessionEvents(dir)
+  const event = (read.events ?? []).find((entry) => entry.type === 'user/message')
+  if (event === undefined) return null
+  const text = (event.data?.content ?? []).filter((part) => part.type === 'text').map((part) => part.text).join('')
+  return {
+    seq: event.seq ?? null,
+    chars: text.length,
+    sha256: createHash('sha256').update(text, 'utf8').digest('hex').toUpperCase(),
+    head: text.slice(0, 400),
+    tail: text.slice(-160),
+  }
+}
+
+/**
+ * 从源码**逐字**取回插件发给生成会话的 prompt（`buildExpertGenerationPrompt`）。
+ *
+ * ⚠️ 这是**兜底通道**的素材。P10 实测里它是必须的：宿主**没有把插件排队的那条 prompt 派发出去**
+ * （缺陷的现场与 P11 的修复见 `runExpertGenerationProbe()` 里的注释）。P11 修复后正常路径走不到这里：
+ * 套件先在会话 JSONL 上轮询，产品自己那条 `user/message` 一到就跳过换会话与补发。
+ * 真走到补发这一步时，"prompt 内容到底对不对"就不能靠"某条消息出现过"来证明。做法是从
+ * `src/client/hooks/useWorkbenchExperts.ts` 抽出 `buildExpertGenerationPrompt` 的**字面量行**，
+ * 组装出与插件**同一份**文本，再用**真实键盘**从页面 composer 发出去 —— 送信通道仍是
+ * 真宿主的 composer（不是 API 造假），prompt 文本与插件逐字一致（抽不到就如实返回 null，
+ * 本层转 skip，不猜）。
+ */
+function readPluginGenerationPrompt(request, methodology) {
+  const source = readFileSync(join(ROOT, 'src', 'client', 'hooks', 'useWorkbenchExperts.ts'), 'utf8')
+  const fn = source.slice(source.indexOf('export function buildExpertGenerationPrompt'))
+  const body = fn.slice(0, fn.indexOf('\n}'))
+  const literals = [...body.matchAll(/'((?:[^'\\]|\\.)*)'/g)].map((match) => match[1].replace(/\\'/g, "'").replace(/\\n/g, '\n'))
+  const start = literals.indexOf('你在本工作台里负责**新建一位专家角色**（人格文档 + 需要的 skill）。')
+  const tail = literals.indexOf('不要自己去写工作台的数据文件，也不要请求用户手动复制文件。')
+  if (start < 0 || tail < 0) return null
+  /** 模板里的两处插值是 `input.methodology.trim()` 与 `input.request.trim()`，按出现顺序替换。 */
+  const output = []
+  let substituted = 0
+  for (let index = start; index <= tail; index += 1) {
+    const literal = literals[index]
+    if (literal === '## 方法论（全文）') { output.push(literal, methodology.trim()); substituted += 1; continue }
+    if (literal === '## 用户的请求') { output.push(literal, request.trim()); substituted += 1; continue }
+    output.push(literal)
+  }
+  return substituted === 2 ? output.join('\n') : null
+}
+
+/** 目标库里某个会话名下的专家草稿行（`phase` / `contentVersion` 在 payload_json 里）。 */
+async function readExpertDraftRow(sessionId, draftId) {
+  const { DatabaseSync } = await import('node:sqlite')
+  if (options.dbPath === '' || existsSync(options.dbPath) === false) return { error: `目标库不存在或未给出：${options.dbPath === '' ? '(空)' : options.dbPath}` }
+  const database = new DatabaseSync(options.dbPath, { readOnly: true })
+  try {
+    const row = draftId === undefined
+      ? database.prepare(`select id, session_id, status_code, created_at, payload_json from task_drafts
+          where kind_code = 'expert' and session_id = ? order by created_at desc limit 1`).get(sessionId)
+      : database.prepare(`select id, session_id, status_code, created_at, payload_json from task_drafts
+          where kind_code = 'expert' and id = ? limit 1`).get(draftId)
+    if (row === undefined) return { found: false }
+    const payload = JSON.parse(row.payload_json)
+    return {
+      found: true,
+      id: row.id,
+      sessionId: row.session_id,
+      statusCode: row.status_code,
+      createdAt: row.created_at,
+      contentVersion: payload.contentVersion,
+      phase: payload.phase,
+      expertId: payload.expertId,
+      request: payload.request,
+      personaChars: String(payload.personaMd ?? '').length,
+      skills: Array.isArray(payload.skills) ? payload.skills.length : 0,
+      files: Array.isArray(payload.files) ? payload.files.length : 0,
+      provenanceKind: payload.provenance?.creationKind ?? null,
+      validation: payload.validation ?? null,
+      lastInstallError: payload.lastInstallError ?? null,
+    }
+  } finally { database.close() }
+}
+
+/**
+ * 目标库里**所有 pending 的专家草稿**关联的会话 id（生成前快照，用来判"哪一行是本次新建的"）。
+ * 只读、失败返回空数组（后面任何一步拿不到草稿行都会如实落进 skip 原因）。
+ */
+async function listPendingExpertDraftSessionIds() {
+  if (options.dbPath === '' || existsSync(options.dbPath) === false) return []
+  const { DatabaseSync } = await import('node:sqlite')
+  const database = new DatabaseSync(options.dbPath, { readOnly: true })
+  try {
+    const rows = database.prepare(`select session_id from task_drafts
+      where kind_code = 'expert' and status_code = 'pending'`).all()
+    return rows.map((row) => String(row.session_id ?? '')).filter((id) => id !== '')
+  } catch { return [] } finally { database.close() }
+}
+
+/** 目标库里**最近若干行**专家草稿（按 created_at 倒序），供"这次点出来的那一行"的筛选使用。 */
+async function readRecentExpertDraftRows(limit = 12) {
+  if (options.dbPath === '' || existsSync(options.dbPath) === false) {
+    return { rows: [], error: `目标库不存在或未给出：${options.dbPath === '' ? '(空)' : options.dbPath}` }
+  }
+  const { DatabaseSync } = await import('node:sqlite')
+  const database = new DatabaseSync(options.dbPath, { readOnly: true })
+  try {
+    const rows = database.prepare(`select id, session_id, status_code, created_at from task_drafts
+      where kind_code = 'expert' order by created_at desc limit ?`).all(limit)
+    return { rows: rows.map((row) => ({ id: row.id, sessionId: row.session_id, statusCode: row.status_code, createdAt: row.created_at })) }
+  } catch (error) {
+    return { rows: [], error: error instanceof Error ? error.message : String(error) }
+  } finally { database.close() }
+}
+
+/** 用户正式角色库根（与 `src/personas/library.ts:59` 的 `defaultUserPersonaRoot` 同一口径）。 */
+const USER_PERSONA_ROOT = join(homedir(), '.dsh', 'workbench', 'personas')
+
+/**
+ * 正式角色库里有没有这个 expert（**确认前**必须没有）。
+ *
+ * 专家 id 形如 `generated/<uuid>`（`defaultExpertId()`），P10 实测确认前用户库**整个目录都不存在**；
+ * 所以判据是"用户库根下递归任何文件/目录名或内容里出现这个 expertId"。刻意不用"目录存在=有"：
+ * 别的专家装过一次之后目录就会存在，那条会变成假绿。
+ */
+function expertInUserLibrary(expertId) {
+  const needle = String(expertId ?? '')
+  if (needle === '') return { checked: false, reason: 'expertId 为空' }
+  if (existsSync(USER_PERSONA_ROOT) === false) return { checked: true, present: false, rootExists: false, root: USER_PERSONA_ROOT }
+  const hits = []
+  const walk = (dir, depth) => {
+    if (depth > 6) return
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (full.includes(needle) || entry.name.includes(needle.replace('generated/', ''))) { hits.push(full); continue }
+      if (entry.isDirectory()) walk(full, depth + 1)
+      else if (entry.isFile() && entry.name.endsWith('.md')) {
+        try { if (readFileSync(full, 'utf8').includes(needle)) hits.push(full) } catch { /* 读不了就当没命中 */ }
+      }
+    }
+  }
+  walk(USER_PERSONA_ROOT, 0)
+  return { checked: true, present: hits.length > 0, hits: hits.slice(0, 5), rootExists: true, root: USER_PERSONA_ROOT }
+}
+
+/**
+ * 在**真实的 `start-generation` 弹窗**里发起一次生成（AX-E60 的入口动作）。
+ *
+ * 工作区**刻意选仓库自己那个**（`D:\Code\Linksight\dsh-workbench`）而不是"第一个选项"：
+ * P10 首跑用 `options[0]` 落到 `D:\Game\Minecraft`，生成会话就被开在了另一个项目目录里 ——
+ * 会话记录在哪个项目键下取决于 `workspaceId` 指向的路径，选错会让"找会话目录"这一步
+ * 变得不可判。这里按 `<option>` 的**展示文案**匹配（宿主的 option value 就是 path）。
+ */
+async function startGenerationViaUi(request) {
+  const steps = {}
+  await ensureWorkbenchPanel(browser)
+  await sleep(800)
+  steps.settingsClick = await browser.clickByText('设置', '.wb-h button')
+  await sleep(1200)
+  if (await browser.evaluate(`return document.querySelector('[data-wb-experts="admin"]') !== null;`) !== true) {
+    await browser.clickByText('角色库', '.wb-settings-nav button')
+    await sleep(1200)
+  }
+  steps.adminPresent = await browser.evaluate(`return document.querySelector('[data-wb-experts="admin"]') !== null;`)
+  steps.createClick = await browser.evaluate(`
+    const el = document.querySelector('[data-wb-expert-action="create"]');
+    if (el === null) return 'no-entry';
+    el.click();
+    return 'ok';
+  `)
+  await sleep(1000)
+  steps.typed = await browser.evaluate(`
+    const input = document.querySelector('[data-wb-expert-field="request"]');
+    if (input === null) return false;
+    const proto = input.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(input, ${JSON.stringify(request)});
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `)
+  await sleep(400)
+  steps.workspace = await browser.evaluate(`
+    const select = document.querySelector('[data-wb-expert-field="workspace"]');
+    if (select === null) return { ok: false, reason: 'no-select' };
+    /**
+     * ⚠️ P10 实战教训（两条，都是实测打脸）：
+     * 1. 这个下拉的 **value 是工作区 UUID，不是路径**；路径只在 textContent 上
+     *    （实测 value=3e7c363d-… 对应 text=D:\Game\Minecraft）。
+     *    第一版按 value 找路径 ⇒ 一个都匹配不上 ⇒ 静默留在默认项，生成会话被开到了别的仓库
+     *    （实测落到 --D-Game-Minecraft-- 项目目录下，草稿的会话行也在那儿）。
+     * 2. 路径比较必须**归一化**（反斜杠→斜杠、小写、去尾斜杠）：工作区行里的路径不保证与
+     *    repoRootFromSuite() 逐字相同（盘符大小写、斜杠方向都可能不同）。
+     * 所以：按 **textContent** 归一化后找，找不到再退回目录名后缀，找不到就**如实报错**，
+     * 绝不静默用默认项（那会把生成会话开到别的仓库里去）。
+     */
+    const target = ${JSON.stringify(ROOT)}.replace(/\\\\/g, '/').replace(/\\/+$/, '').toLowerCase();
+    const label = ${JSON.stringify(basename(ROOT))}.toLowerCase();
+    const options0 = Array.from(select.options).filter((option) => option.value !== '');
+    const normalize = (value) => String(value ?? '').replace(/\\\\/g, '/').replace(/\\/+$/, '').toLowerCase();
+    const textOf = (option) => normalize(option.textContent);
+    const wanted = options0.find((option) => textOf(option) === target)
+      ?? options0.find((option) => textOf(option).split('/').pop() === label);
+    if (wanted === undefined) {
+      return {
+        ok: false,
+        reason: 'no-matching-workspace',
+        target,
+        available: options0.map((option) => ({ value: option.value, text: String(option.textContent || '').trim() })).slice(0, 8),
+      };
+    }
+    Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set?.call(select, wanted.value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return { ok: true, value: wanted.value, label: String(wanted.textContent || '').trim() };
+  `)
+  await sleep(600)
+  steps.submitState = await browser.evaluate(`
+    const btn = document.querySelector('[data-wb-expert-action="start-generation"]');
+    return btn === null ? null : { disabled: btn.disabled === true, text: (btn.textContent || '').trim() };
+  `)
+  await browser.screenshot(`${suite.dir}/10-生成入口已填.png`).catch(() => undefined)
+  steps.clicked = await browser.evaluate(`
+    const btn = document.querySelector('[data-wb-expert-action="start-generation"]');
+    if (btn === null) return { ok: false, reason: 'no-button' };
+    if (btn.disabled === true) return { ok: false, reason: 'disabled' };
+    btn.click();
+    return { ok: true };
+  `)
+  return steps
+}
+
+/**
+ * AX-E60 的主流程：真浏览器开生成会话 → 找到**那个**会话的 JSONL → 等模型真的调工具。
+ *
+ * 时序（P10 实测；P11 起"产品自己派发"成为判据）：宿主建会话是**秒级**，但新会话的第一轮要按分钟计时
+ *（P10 实测 14:06:40 建会话 → 14:13:39 才出现第一条 `user/message`；那一次的第一条消息是**人手工补发**的）。
+ * 所以这里给足预算：`DSH_VERIFY_EXPERT_DISPATCH_MS`（默认 **180000ms**，轮询 10s 一次）等**产品自己**
+ * 把排队的 prompt 派发出来，`DSH_VERIFY_EXPERT_TURN_MS`（默认 600000ms）等模型把工具调完；
+ * 派发超时就退到换会话 + composer 兜底（`dispatchPath='composer-fallback'`，产品通道判红）。**不假通过**。
+ */
+async function runExpertGenerationProbe() {
+  const findings = { steps: {}, notes: [], calls: [], evidence: {} }
+  if (browser === undefined) return { ok: false, reason: '浏览器层没有起来（真实 DOM 判据的前置缺失），无法走 UI 开生成会话', findings }
+  if (options.dbPath === '' || existsSync(options.dbPath) === false) {
+    return { ok: false, reason: `没有目标库路径（--db-path / WORKBENCH_EXPECTED_DB_PATH），无法复读草稿行：${options.dbPath === '' ? '(空)' : options.dbPath}`, findings }
+  }
+  const before = snapshotSessionDirs()
+  findings.notes.push(`生成前会话目录 ${before.size} 个`)
+  /**
+   * 生成前先把"库里已存在的 pending 专家草稿"快照下来：本次生成创建的草稿一定是**新的**那一行。
+   * 这样即使前端报错（P10 的缺陷现场；P11 修复后正常不该有 `[data-wb-expert-error]`），
+   * 我们仍能拿到宿主真正建出的生成会话 id。
+   */
+  const pendingBefore = await listPendingExpertDraftSessionIds()
+  const startedAtIso = new Date().toISOString()
+
+  /** 极短请求（≤60 字）：真实模型计费，本批刻意用最短的需求文本。 */
+  const request = `验证用：只做一件事——按方法论新建「验证用就绪专家」，只回答「就绪」。runId=${runId}`
+  findings.request = request
+  findings.requestChars = request.length
+  findings.steps.start = await startGenerationViaUi(request)
+  /**
+   * 前端把失败原因渲染在 `[data-wb-expert-error]` 上：这是**产品侧缺陷的现场证据**，必须记
+   *（P10 的平铺响应缺陷就在这里显示 `generation-start-failed`；P11 修好后正常应为 `null`）。
+   */
+  findings.uiError = await browser.evaluate(`
+    const el = document.querySelector('[data-wb-expert-error]');
+    return el === null ? null : { code: el.getAttribute('data-wb-expert-error'), text: (el.textContent || '').trim().slice(0, 200) };
+  `).catch(() => null)
+
+  // ── 找**它**建出来的会话目录（不看草稿行、不看 JSONL 有没有内容）────────────────
+  /**
+   * P10 第三次单跑的教训：**草稿行不能当起点**。同一套件前面的 HTTP 层（`checkHttpLayer`）会为本轮 `runId`
+   * 直接 `POST /api/workbench/experts/generation-start` 造一条草稿行，`created_at` 比 UI 这次点击更晚，
+   * 且 `session_id` 是**合成 id**（`verify-expert-<runId>-gen`，磁盘上没有对应目录）；只按 DB 取"最新一行"
+   * 就会拿一个磁盘上不存在的会话 id 去找目录，白等 180s。
+   * 反过来，**磁盘证据**是硬的：`sessions.create()` 会立刻建出 `<项目键>/<session-…|uuid>` 目录。
+   * 所以顺序改成：先按目录认会话 → 再用它的 id 去 DB 认草稿行。
+   */
+  const buildRows = (keys) => {
+    const now = snapshotSessionDirs()
+    const rows = []
+    for (const key of keys) {
+      const [project, entry] = key.split('/')
+      const dir = sessionDirOf(project, entry)
+      try { rows.push({ key, project, entry, dir, mtimeMs: now.get(key)?.mtimeMs ?? 0, ...sessionSummary(dir) }) } catch { /* 目录正在写，下一轮再看 */ }
+    }
+    return rows
+  }
+  const freshKeys = () => {
+    const now = snapshotSessionDirs()
+    return [...now.keys()].filter((key) => before.has(key) === false)
+  }
+  const rowForKey = (key) => buildRows([key])[0] ?? null
+  const rootKey = ROOT_PROJECT_KEY
+  const rootNorm = ROOT_NORM
+  /**
+   * 选中规则（P10 实测教训：**不能只取"最新一个"**，同一次点击可能同时冒出别的项目的新会话）：
+   * 1. 新目录里 `session` 事件的 `cwd` 等于仓库根；
+   * 2. 项目键匹配仓库根；
+   * 3. 两者都没有时报出全部新目录让调用方如实记 skip。
+   */
+  const pickSession = () => {
+    const fresh = freshKeys()
+    const freshRows = buildRows(fresh)
+    const match = freshRows.find((row) => row.key.startsWith(rootKey))
+      ?? freshRows.find((row) => row.sessionId !== null && String(row.cwd ?? '').replace(/\\/g, '/').toLowerCase() === rootNorm)
+      ?? null
+    return { fresh, freshRows, match }
+  }
+
+  let tracked = null
+  let waited = 0
+  const dispatchBudget = Number(process.env.DSH_VERIFY_EXPERT_DISPATCH_MS ?? '180000')
+  while (waited < dispatchBudget) {
+    const { fresh, freshRows, match } = pickSession()
+    if (tracked === null && match !== null) {
+      tracked = match
+      findings.notes.push(`新会话目录 ${fresh.length} 个：${JSON.stringify(fresh.slice(0, 4))}；选中 ${match.key}（来源：cwd/项目键）`)
+    }
+    const freshSessionIds = freshRows.filter((row) => row.sessionId !== null).map((row) => row.sessionId)
+    if (freshSessionIds.length > 0) findings.sessionIds = freshSessionIds
+    if (tracked !== null) {
+      const current = rowForKey(tracked.key) ?? tracked
+      tracked = current
+      /**
+       * 停等条件：这个会话**真的落了一条 JSONL**（有 `session` 事件 / 有 user 消息 / 有工具调用）。
+       * P10 第一版要求 `events > 4`，结果把"宿主建了会话但 JSONL 只有 4 条握手事件"当成"没建会话"
+       * —— 那会把**产品缺陷**误报成"环境里没有会话"，判据必须只认"这条目录存在且可读"。
+       */
+      if ((current.sessionId ?? null) !== null && (current.events ?? 0) >= 1) break
+      if ((current.userMessages ?? []).length > 0 || (current.toolCalls ?? []).length > 0) break
+    }
+    await sleep(5000)
+    waited += 5000
+    if (waited % 60000 === 0) findings.notes.push(`等待生成会话落盘 ${waited / 1000}s（新目录 ${fresh.length} 个）`)
+  }
+  findings.runified = { waitedMs: waited, dispatchBudget }
+  if (tracked === null) {
     return {
       ok: false,
-      reason: `本机没有可用的 web-profile headless 入口（退出码 ${result.code}${stderrTail === '' ? '' : `；stderr: ${stderrTail}`}）：` +
-        '`headless` 在本机 DSH 里是 profile 名而非 web profile 的子命令，真实模型链路需走目标实例自己的会话 API，本次未实现',
+      reason: `点「开始生成」后 ${Math.round(waited / 1000)}s 内没有在 ~/.dsh/sessions 下看到这次点出来的会话目录（仓库根 ${ROOT}；新目录 ${freshKeys().length} 个）`,
       findings,
     }
   }
-  /** 第二条证据：DB 里出现了**该模型会话**名下的专家草稿（HTTP 重读，不是读进程内存）。 */
-  const drafts = await sessionApi.get(`/api/workbench/experts/drafts?session_id=${encodeURIComponent(sessionId)}`).catch(() => undefined)
-  findings.notes.push(`drafts by session 探测：status=${drafts?.status ?? 'n/a'}`)
+  const draftSessionId = tracked.sessionId ?? null
+  findings.draftSessionId = draftSessionId
+  findings.session = sessionSummary(tracked.dir)
+
+  // ── P11 判据核心：**产品自己**把提示词发给模型了吗？──────────────────────────
+  /**
+   * 为什么这段必须独立存在（P11 新增，直接对着 P10 的漏洞）：
+   *
+   * P10 实测的缺陷是：前端第 7 步把**平铺**响应当 `res.draft.id` 读（服务端给的是顶层 `draftId`）
+   * ⇒ 判"服务端没有返回草稿"⇒ 第 9 步 `session.prompt([...], 'queue')` 永不执行
+   * ⇒ 用户点「开始生成」什么都不会发生。P11 的修复见
+   * `src/client/hooks/useWorkbenchExperts.ts:400` 的 `normalizeExpertDraftResponse()`。
+   *
+   * 但套件里有一条**手工补发**的兜底通道（`readPluginGenerationPrompt` 逐字复刻 + 真实 composer 发送），
+   * 而 E60 原来只看"模型有没有调工具 + 草稿有没有落库"⇒ **功能坏了也能亮绿灯**
+   * （P10 的 4280 字符 prompt 就是分析者手工打进真实输入框的）。所以这里先在**被追踪会话的 JSONL** 上轮询：
+   * 一旦出现插件自己那条 `user/message`（`session.prompt(..., 'queue')` 落到会话记录），
+   * 就认 `plugin-queued`，并且**整段"关浏览器 + 冷启动换会话"直接跳过** —— 产品会自己把会话开到主视图
+   * （`useWorkbenchExperts.ts:851` 的 `openSessionInMainView`），没有人需要打开发输入框。
+   * 预算内没出现才走换会话 + composer 兜底，但产品通道判红（见 `checkModelLayer()` 的新 check）。
+   *
+   * 预算旋钮 `DSH_VERIFY_EXPERT_DISPATCH_MS`（默认 180000ms），轮询间隔 10s（要求 5–15s）。
+   */
+  const pluginDispatchBudgetMs = Number(process.env.DSH_VERIFY_EXPERT_DISPATCH_MS ?? '180000')
+  const PLUGIN_DISPATCH_INTERVAL_MS = 10000
+  let pluginDispatchWaited = 0
+  /** @type {{budgetMs:number,intervalMs:number,waitedMs:number,dispatched:boolean,samples:object[],suiteModelCallsAtDetection:number|null}} */
+  findings.pluginDispatch = {
+    budgetMs: pluginDispatchBudgetMs,
+    intervalMs: PLUGIN_DISPATCH_INTERVAL_MS,
+    waitedMs: 0,
+    dispatched: false,
+    samples: [],
+    suiteModelCallsAtDetection: null,
+  }
+  let pluginDispatchSeen = (findings.session.userMessages ?? []).length > 0
+  while (pluginDispatchSeen === false && pluginDispatchWaited < pluginDispatchBudgetMs) {
+    await sleep(PLUGIN_DISPATCH_INTERVAL_MS)
+    pluginDispatchWaited += PLUGIN_DISPATCH_INTERVAL_MS
+    const snapshot = { ...tracked, ...sessionSummary(tracked.dir) }
+    tracked = snapshot
+    findings.session = snapshot
+    if (findings.pluginDispatch.samples.length < 60) {
+      findings.pluginDispatch.samples.push({
+        atMs: pluginDispatchWaited,
+        events: snapshot.events ?? 0,
+        userMessages: (snapshot.userMessages ?? []).length,
+        toolCalls: (snapshot.toolCalls ?? []).length,
+      })
+    }
+    if ((snapshot.userMessages ?? []).length > 0) pluginDispatchSeen = true
+  }
+  findings.pluginDispatch.waitedMs = pluginDispatchWaited
+  findings.pluginDispatch.dispatched = pluginDispatchSeen
+  /** 探测到的那一刻套件发过几次真实 prompt：正常是 **0**（这就是"不是人打的"的硬证据）。 */
+  findings.pluginDispatch.suiteModelCallsAtDetection = modelCallsMade
+  findings.pluginFirstUserMessage = pluginDispatchSeen ? firstUserMessageFull(tracked.dir) : null
+  /**
+   * 派发通道**只有一个真值来源**：被追踪会话的 JSONL。
+   * `plugin-queued` = 产品自己那条 `user/message` 到位；`not-dispatched-within-budget` = 预算内没等到
+   *（后面若走 composer 兜底会改写成 `composer-fallback`，两者都会被新 check 判红）。
+   */
+  findings.dispatchPath = pluginDispatchSeen ? 'plugin-queued' : 'not-dispatched-within-budget'
+  findings.notes.push(`产品派发轮询：${pluginDispatchWaited / 1000}s 内 ${pluginDispatchSeen ? '看到' : '没看到'}插件自己那条 user/message（dispatchPath=${findings.dispatchPath}）`)
+
+  // ── 草稿行（用**刚认下来的会话 id** 去 DB 取，不用"最新一行"）──────────────────
+  const recent = await readRecentExpertDraftRows(12)
+  findings.recentDraftRows = recent.rows
+  const startRow = (draftSessionId === null ? undefined : await readExpertDraftRow(draftSessionId)) ?? {}
+  findings.startDraftRow = startRow
+  /**
+   * P10 实测的**产品缺陷**与 P11 的**修复**（历史保留；文档不要再说"缺陷仍在"）：
+   *
+   * - 缺陷（P10 实测）：前端 `useWorkbenchExperts.start()` 在第 7 步把**平铺**响应当成 `res.draft.id` 读
+   *   （服务端 `expertDraftView()` 给的是顶层 `draftId`，没有 `id`/`payload`）⇒ 前端判"服务端没有返回草稿"
+   *   并**提前 return**，于是第 9 步的 `session.prompt([...], 'queue')` **根本不会执行**。
+   *   草稿行与会话都已真实存在，卡住的只有"插件自己把 prompt 发出去"这一步。
+   * - 修复（P11，已合入工作区）：三处读取统一走 `normalizeExpertDraftResponse()`
+   *   （`src/client/hooks/useWorkbenchExperts.ts:400`，认 `id` / `draftId` 两种形状，都不是才返回 null）。
+   *
+   * `pluginPromptDispatchBlocked` 保留原名，但**判据换成上面实测出来的 `dispatchPath`**：
+   * P10 用的 `startRow.createdAt > startedAtIso` 启发式在修复后**恒真**（草稿行本来就是这次点击建出来的），
+   * 留着只会误导；`createdAt` 与点击时刻的关系另记 `draftRowCreatedDuringClick` 作对照证据。
+   */
+  findings.draftRowCreatedDuringClick = typeof startRow.createdAt === 'string' && startRow.createdAt > startedAtIso
+  findings.pluginPromptDispatchBlocked = findings.dispatchPath !== 'plugin-queued'
+
+  /**
+   * 在**同一个真实浏览器**里把这个生成会话切成「SPA 当前会话」。
+   *
+   * ⚠️ P10 实测的四条硬事实（都有独立探针，别凭直觉改）：
+   *
+   * 1. **`?token=…&session=<id>` 对 SPA 无效**。`_p10_probe_current.mjs` 连做多次 `Page.navigate`
+   *    换 `?session=`（f4d437a3 → 7ec1bdca → 别的 id），SPA 自己的
+   *    `localStorage['dsh.sessions.current']` **一次都没变**；查询串还被应用壳立刻抹掉
+   *    （`location.href` 恒为 `http://127.0.0.1:3080/`）。后果实测很严重：run 9 把 4280 字符的插件
+   *    prompt 发进了**另一个**会话（`session-f4d437a3-…`，那是更早一次运行留下的"当前会话"），
+   *    被追踪的 `session-7ec1bdca-…` 于是永远只有 4 条握手事件。
+   * 2. **打开工作台面板时 composer 会消失**，面板自己的浮层（`div.wb-overlay`）会吃掉点击
+   *    （run 10 实测：`clicked.fallbackTarget = "div.wb-overlay"`）。整页重载会把面板/弹窗全清掉，
+   *    重载后 composer 就回来了（`_p10_probe_control.mjs` 步骤 2）。
+   * 3. **侧栏根本列不出"刚建出来、还没有任何消息"的会话**（run 11 实测：`dsh-workbench` 下第一条会话行
+   *    写着「新会话」，点它 `dsh.sessions.current` 纹丝不动 —— 那一条就是当前会话自己的占位行；
+   *    目标会话在侧栏里根本没有行）。所以"真点侧栏"只能作为**兜底**，不能当主路径。
+   * 4. **唯一确定性可用的开关是「整页重载 + 等 SPA 自己认领」**：SPA 在启动时会把"当前会话"解析成那个
+   *    新会话，但**有滞后**——run 10/run 11 各自建出的会话都是在几十分钟后的下一次浏览器启动才变成
+   *    `dsh.sessions.current`（`_p10_probe_control.mjs` 冷启动 = `d48ca06b`；
+   *    `_p10_probe_pin.mjs` 重载后 = `1925eb4d`，两次都是"最近一次运行建出来的那个"）。
+   *    所以这里**反复重载 + 轮询**（`DSH_VERIFY_EXPERT_SWITCH_MS`，默认 300s）等它认领。
+   *
+   * 走完还是不是目标会话的话，**如实返回失败**：宁可记未验证，也不把消息发进别的会话。
+   *
+   * ⚠️ P11：**这一整段只在"产品自己没派发"时才跑**。产品自己派发时（`dispatchPath === 'plugin-queued'`）
+   * 它会跳过 —— 产品在自己的第 10 步就 `openSessionInMainView()` 把生成会话开到了主视图，
+   * 没有人需要再动浏览器，也没有人需要打开发输入框。
+   */
+  if (draftSessionId !== null && findings.dispatchPath !== 'plugin-queued') {
+    const workspaceTitle = basename(ROOT_TRIMMED)
+    const readPage = async () => {
+      const value = await browser.evaluate(`
+      let current = null;
+      try { current = localStorage.getItem('dsh.sessions.current'); } catch (error) { current = null; }
+      const composer = document.querySelector('[data-composer-input="true"]');
+      const rows = Array.from(document.querySelectorAll('[role="treeitem"]'));
+      return {
+        current,
+        composer: composer === null ? null : (composer.getAttribute('data-placeholder') || ''),
+        rows: rows.map((el) => (el.textContent || '').trim().slice(0, 48)),
+      };
+    `).catch(() => null)
+      return value !== null && value !== undefined && typeof value === 'object' ? value : null
+    }
+    /** 轮询到 `predicate(state)` 为真（或超时），返回最后一次读数。 */
+    const pollPage = async (predicate, timeoutMs) => {
+      const deadline = Date.now() + timeoutMs
+      let last = null
+      while (Date.now() < deadline) {
+        await sleep(1500)
+        last = await readPage()
+        if (last !== null && predicate(last) === true) return last
+      }
+      return last
+    }
+    const isTarget = (state) => state !== null && state !== undefined && typeof state === 'object'
+      && typeof state.current === 'string' && state.current.includes(draftSessionId)
+
+    findings.steps.openSession = await (async () => {
+      const attempt = { workspaceTitle, target: draftSessionId }
+      attempt.initial = await readPage()
+
+      /**
+       * 主路径：**关掉当前浏览器实例、冷启动一个新的**，直到 SPA 把 `dsh.sessions.current` 解析成这个新会话。
+       *
+       * 为什么必须是"冷启动新进程"而不是"同一个实例里重新加载"：P10 实测（run 11/12 的整页重载始终停在
+       * 上一个会话 `session-1925eb4d`；而 `_p10_probe_pointcurrent.mjs` 一次冷启动就把 `current` 解析成了
+       * run 12 刚建出的 `session-eca454ba`，DOM 里也能搜到它的 id）——**只有全新进程的冷启动会认领最新会话**。
+       */
+      const switchBudget = Number(process.env.DSH_VERIFY_EXPERT_SWITCH_MS ?? '300000')
+      attempt.switchBudgetMs = switchBudget
+      const startedAt = Date.now()
+      const relaunches = []
+      try {
+        while (Date.now() - startedAt < switchBudget) {
+          await browser.close().catch(() => undefined)
+          browser = await launchSuiteBrowser({ url: options.url, token: options.token, userDataRoot: options.userDataRoot, browserPath: BROWSER_PATH })
+          await browser.goto(api.pageUrl())
+          const state = await pollPage((candidate) => candidate !== null && typeof candidate === 'object'
+            && candidate.composer !== null && candidate.current !== null, 30000)
+          relaunches.push({ atMs: Date.now() - startedAt, current: state?.current ?? null, composer: state?.composer ?? null })
+          attempt.lastRelaunch = state
+          if (isTarget(state)) break
+          await sleep(20000)
+        }
+      } catch (error) {
+        attempt.switchError = error instanceof Error ? `${error.message} @ ${(error.stack ?? '').split('\n')[1]?.trim() ?? ''}` : String(error)
+      }
+      attempt.relaunches = relaunches
+      attempt.afterRelaunchLoop = await readPage()
+
+      /** 兜底：真点侧栏工作区下的第一条会话行（只是兜底，见上面事实 3）。 */
+      if (isTarget(attempt.afterRelaunchLoop) === false) {
+        const clicked = await browser.evaluate(`
+          const title = ${JSON.stringify(workspaceTitle)};
+          const rows = Array.from(document.querySelectorAll('[role="treeitem"]'));
+          const index = rows.findIndex((el) => (el.textContent || '').trim() === title);
+          if (index < 0) return { ok: false, reason: 'no-workspace-row' };
+          const sessionRow = rows[index + 1];
+          if (sessionRow === undefined) return { ok: false, reason: 'no-session-row-after-workspace' };
+          const rect = sessionRow.getBoundingClientRect();
+          return {
+            ok: true,
+            text: (sessionRow.textContent || '').trim().slice(0, 48),
+            x: Math.round(rect.left + rect.width / 2),
+            y: Math.round(rect.top + rect.height / 2),
+            visible: rect.height > 0,
+          };
+        `).catch((error) => ({ ok: false, reason: error instanceof Error ? error.message : String(error) }))
+        attempt.sidebarRow = clicked
+        if (clicked?.ok === true && clicked.visible === true) {
+          attempt.sidebarClicked = await browser.clickAt(clicked.x, clicked.y).catch(() => null)
+        }
+        attempt.afterSidebarClick = await pollPage(isTarget, 20000)
+      }
+
+      const finalState = await readPage()
+      attempt.final = finalState
+      attempt.verified = isTarget(finalState) && finalState.composer !== null
+      return attempt
+    })()
+    const opened = findings.steps.openSession
+    findings.composerAfterSwitch = opened?.final?.composer ?? null
+    if (opened?.verified !== true) {
+      return {
+        ok: false,
+        reason: `无法把浏览器切到生成会话 ${draftSessionId}（${Math.round((opened?.switchBudgetMs ?? 0) / 1000)}s 内反复"关浏览器 + 冷启动新实例" + 真点侧栏，SPA 的 dsh.sessions.current 始终不是它；不换通道、不把消息发给别的会话），现场：${safeJson(opened).slice(0, 700)}`,
+        findings,
+      }
+    }
+    /**
+     * 静置等待：给宿主一点时间把这个刚建的会话"认领"进运行时（P10 实测：静置后再发，
+     * 20s 内就 `turn/start` + `request/header`；这一条不单独作为判据，只是省一次白等的钱）。
+     */
+    const settleMs = Number(process.env.DSH_VERIFY_EXPERT_SETTLE_MS ?? '20000')
+    findings.settleMs = settleMs
+    if (settleMs > 0) {
+      findings.notes.push(`切换并验证到生成会话后静置 ${Math.round(settleMs / 1000)}s`)
+      await sleep(settleMs)
+      findings.steps.openSessionAfterSettle = await readPage()
+    }
+  }
+
+  /**
+   * ── 兜底通道（只有"产品自己没派发"才会走到这里；P10 的历史缺陷已由 P11 修复）──────────
+   *
+   * 历史（P10 实测，非推断，保留作对照）：前端 `useWorkbenchExperts.start()` 第 7 步把 `res.draft.id`
+   * 当响应读（冻结产物 `lib/client/hooks/useWorkbenchExperts.js:549-551`），而服务端给的是顶层 `draftId`
+   * ⇒ 判"服务端没有返回草稿"并 return，第 8 步 `session.rename()` 与第 9 步
+   * `session.prompt([...], 'queue')`（`src/client/hooks/useWorkbenchExperts.ts:832-837`）**根本不会执行**。
+   * 所以被追踪的生成会话永远只有 4 条握手事件、0 条 `user/message`。
+   * **P11 已修**：第 7 步（以及 :908 / :989 两处）统一走 `normalizeExpertDraftResponse()`
+   * （`src/client/hooks/useWorkbenchExperts.ts:400`）；正常路径上这条兜底不该再被用到
+   * （`dispatchPath` 会是 `plugin-queued`）。
+   *
+   * 走到这里说明上面的轮询预算内**没看见**产品那条 `user/message`。处理：用**同一份插件 prompt 文本**
+   * （`readPluginGenerationPrompt` 逐字抽取）通过真实 composer 补发一次，并且**必须发进被追踪的那个会话**
+   * （上面已用真点侧栏 + SPA `dsh.sessions.current` 验证过）。
+   * ⚠️ 这条**不算**"插件自己的 prompt 派发了"：`dispatchPath` 写成 `composer-fallback`，
+   * 于是 `checkModelLayer()` 里那条「点「开始生成」后由产品自己把提示词发给模型」会**判红**
+   * —— 这正是 P10"功能坏了还绿灯"漏洞的补丁所在。
+   */
+  /** 用**刚读的新鲜摘要**判"插件那条 prompt 到底有没有派发"，不用循环里那份可能已经过期的 `tracked`。 */
+  const fresh = { ...tracked, ...sessionSummary(tracked.dir) }
+  tracked = fresh
+  const dispatchedByPlugin = (fresh.userMessages ?? []).length > 0 || findings.dispatchPath === 'plugin-queued'
+  if (findings.dispatchPath !== 'plugin-queued') findings.dispatchPath = dispatchedByPlugin ? 'plugin-queued' : 'not-dispatched-within-budget'
+  if (dispatchedByPlugin === false) {
+    /**
+     * 兜底前置：**同一个真实浏览器必须已经停在那个会话上**（`dsh.sessions.current` 是它 +
+     * composer 就绪），否则消息会发到别的会话里去 —— 那等于换了通道，宁可不测也不假通过。
+     */
+    const composer = findings.composerAfterSwitch
+    if (typeof composer !== 'string' || composer === '') {
+      return {
+        ok: false,
+        reason: `插件自己那条 prompt 没有派发（P10 的缺陷形态；P11 的归一化修复没有生效或派发超预算，见上面注释），且同一个真实浏览器没有停在生成会话 ${String(tracked.sessionId)} 上（composer 未就绪：${safeJson(findings.steps.openSession?.final ?? null).slice(0, 300)}），不换通道、如实记未验证`,
+        findings,
+      }
+    }
+    const methodologyResponse = await sessionApi.get('/api/workbench/experts/methodology').catch(() => undefined)
+    const methodology = methodologyResponse?.body?.text
+    if (typeof methodology !== 'string' || methodology === '') {
+      return { ok: false, reason: `宿主在 ${Math.round(waited / 1000)}s 内没有派发插件排队的 prompt，且取不到方法论文本（/api/workbench/experts/methodology 无 text），无法补发同一份 prompt`, findings }
+    }
+    const prompt = readPluginGenerationPrompt(request, methodology)
+    if (prompt === null) {
+      return { ok: false, reason: '宿主没有派发插件排队的 prompt，且抽不到 `buildExpertGenerationPrompt` 的字面量模板（源码形状变了？），不猜、如实记未验证', findings }
+    }
+    findings.evidence.pluginPromptChars = prompt.length
+    findings.evidence.pluginPromptSha256 = createHash('sha256').update(prompt, 'utf8').digest('hex').toUpperCase()
+    writeFileSync(join(suite.dir, 'model-plugin-prompt.txt'), prompt, 'utf8')
+    findings.dispatchPath = 'composer-fallback'
+    findings.call = await sendModelMessage(tracked.sessionId, prompt, 'E60 生成 prompt（composer 兜底，逐字同插件）')
+    findings.modelCalls = modelCallLog.slice()
+    if (findings.call === null || findings.call.ok !== true) {
+      return { ok: false, reason: `补发 prompt 失败：${safeJson(findings.call).slice(0, 300)}`, findings }
+    }
+  }
+
+  // ── 等模型真的调工具 ─────────────────────────────────────────────────────────
+  const turnBudget = Number(process.env.DSH_VERIFY_EXPERT_TURN_MS ?? '600000')
+  const wanted = ['workbench_get_expert_draft', 'workbench_submit_expert_draft', 'workbench_validate_expert_draft']
+  let turnWaited = 0
+  let summary = tracked
+  while (turnWaited < turnBudget) {
+    await sleep(15000)
+    turnWaited += 15000
+    summary = { ...tracked, ...sessionSummary(tracked.dir) }
+    const names = (summary.toolCalls ?? []).map((call) => call.name)
+    if (names.includes('workbench_submit_expert_draft') || names.includes('workbench_validate_expert_draft')) break
+    if (turnWaited % 60000 === 0) findings.notes.push(`等模型调工具 ${turnWaited / 1000}s：已见 ${JSON.stringify(names.slice(0, 6))}`)
+  }
+  findings.turnWaitedMs = turnWaited
+  findings.session = {
+    key: tracked.key,
+    dir: tracked.dir,
+    sessionId: summary.sessionId,
+    cwd: summary.cwd,
+    parentSession: summary.parentSession ?? null,
+    delegationDepth: summary.delegationDepth ?? null,
+    titles: summary.titles,
+    events: summary.events,
+    frames: summary.frames,
+    failedFrames: summary.failedFrames,
+    userMessageCount: (summary.userMessages ?? []).length,
+    userMessageHead: (summary.userMessages ?? []).slice(0, 3),
+    model: summary.model,
+    toolsOfferedCount: summary.toolsOffered === null ? null : summary.toolsOffered.length,
+    toolsOffered: summary.toolsOffered === null ? null : summary.toolsOffered.slice(0, 64),
+    expertGenerationToolsOffered: summary.toolsOffered === null ? null : summary.toolsOffered.filter((name) => EXPERT_GENERATION_TOOL_NAMES.includes(name)),
+    toolCalls: summary.toolCalls,
+    toolResults: summary.toolResults,
+  }
+  const callNames = (summary.toolCalls ?? []).map((call) => call.name)
+  findings.calls = callNames
+
+  // ── 目标库复读草稿行 ────────────────────────────────────────────────────────
+  const row = await readExpertDraftRow(summary.sessionId)
+  findings.draftRow = row
+  if (row.found === true) {
+    cleanupDraftId = row.id
+    findings.expertInUserLibrary = expertInUserLibrary(row.expertId)
+  }
+
+  // ── 判据 ────────────────────────────────────────────────────────────────────
+  const independentSession = summary.sessionId !== null
+    && summary.parentSession === null
+    && (summary.delegationDepth ?? 0) === 0
+    && summary.sessionId !== (typeof options.sessionId === 'string' ? options.sessionId : '')
+  const hasDraft = row.found === true && row.sessionId === summary.sessionId
+  const getCalled = callNames.includes('workbench_get_expert_draft')
+  const submitCalled = callNames.includes('workbench_submit_expert_draft')
+  const validateCalled = callNames.includes('workbench_validate_expert_draft')
+  const versionAdvanced = hasDraft && Number(row.contentVersion) >= 1
+  const phaseConsistent = hasDraft
+    && (validateCalled
+      ? (row.validation !== null && typeof row.validation?.manifestHash === 'string')
+      : (row.validation === null || row.validation?.manifestHash === undefined))
+  const libraryClean = findings.expertInUserLibrary?.checked === true && findings.expertInUserLibrary.present === false
+  const allFiveOffered = Array.isArray(findings.session?.toolsOffered)
+    && EXPERT_GENERATION_TOOL_NAMES.every((name) => findings.session.toolsOffered.includes(name))
+
+  findings.verdict = { independentSession, hasDraft, getCalled, submitCalled, validateCalled, versionAdvanced, phaseConsistent, libraryClean, allFiveOffered }
+  writeFileSync(join(suite.dir, 'model-e60-session.json'), `${JSON.stringify(findings.session, null, 2)}\n`, 'utf8')
+  /** P11：把"被追踪会话里第一条 `user/message` 的全文读数"单独落盘（报告要用它证明是产品发的）。 */
+  if (findings.pluginFirstUserMessage !== null && findings.pluginFirstUserMessage !== undefined) {
+    writeFileSync(join(suite.dir, 'model-e60-first-user-message.json'), `${JSON.stringify(findings.pluginFirstUserMessage, null, 2)}\n`, 'utf8')
+  }
+  writeFileSync(join(suite.dir, 'model-e60-dispatch.json'), `${JSON.stringify(findings.pluginDispatch ?? null, null, 2)}\n`, 'utf8')
+  writeFileSync(join(suite.dir, 'model-e60-draft-row.json'), `${JSON.stringify({ draftRow: row, userLibrary: findings.expertInUserLibrary }, null, 2)}\n`, 'utf8')
+
+  if (independentSession === false) {
+    return { ok: false, reason: `生成会话不是独立会话（sessionId=${summary.sessionId} parent=${String(summary.parentSession)} depth=${String(summary.delegationDepth)}）`, findings }
+  }
+  if (getCalled === false || submitCalled === false) {
+    return {
+      ok: false,
+      reason: `独立会话确实建出来了（${summary.sessionId}），但 ${Math.round(turnWaited / 1000)}s 内模型没有调 ${getCalled ? '' : 'workbench_get_expert_draft '}${submitCalled ? '' : 'workbench_submit_expert_draft'}`.trim()
+        + `（实际工具调用：${JSON.stringify(callNames.slice(0, 8))}；prompt 通道=${findings.dispatchPath}）`,
+      findings,
+    }
+  }
+  if (hasDraft === false || versionAdvanced === false) {
+    return { ok: false, reason: `模型调了生成工具，但目标库里该会话名下的草稿没有推进（found=${String(row.found)} contentVersion=${String(row.contentVersion)}）`, findings }
+  }
+  if (phaseConsistent === false) {
+    return { ok: false, reason: `草稿 phase/validation 与模型实际动作不一致（validateCalled=${String(validateCalled)} validation=${safeJson(row.validation).slice(0, 200)}）`, findings }
+  }
+  if (libraryClean === false) {
+    return { ok: false, reason: `确认之前正式角色库里就已经有这个专家（expertId=${String(row.expertId)} hits=${safeJson(findings.expertInUserLibrary?.hits).slice(0, 200)}）`, findings }
+  }
   return { ok: true, reason: null, findings }
 }
 
+/**
+ * AX-E61 / AX-E62 的**通道前置**：本机 3080 实例上必须能真的把 `@` 专家引用插进 composer。
+ *
+ * 判据（都可失败）：
+ * - `POST /api/workbench/experts/catalog` 里至少有 1 位可引用专家（否则 E61 无从下手）；
+ * - `@` 提及菜单里出现 `expert:` 前缀的候选（说明 `createExpertInputSource` 真的注册进了宿主）
+ *   —— P10 侦察已实测可见（`仪表回路与测量链专家expert:domain/engineering/rf-…`）。
+ *
+ * 拿到"可引用"之后，真正发一轮、让模型调 `workbench_run_expert_request` 仍需真实模型与
+ * 父会话绑定；那一步若在本环境不可确定性完成，按规格记 skip + 具体原因（不假通过）。
+ */
+async function probeExpertMentionChannel() {
+  const out = { notes: [] }
+  const catalog = await sessionApi.get('/api/workbench/experts/catalog?query=').catch(() => undefined)
+  out.catalogStatus = catalog?.status ?? null
+  out.catalogKeys = catalog?.body === null || typeof catalog?.body !== 'object' ? null : Object.keys(catalog.body).slice(0, 8)
+  /**
+   * 形状照 `GET /experts/catalog` 的**实测**响应取（`{ok,experts,personas,diagnostics,…}`），
+   * 不是猜 `entries`：P10 第一次单跑就因为只认 `entries` 而把"15 位可引用专家"读成 0。
+   */
+  const body = catalog?.body ?? {}
+  const entries = Array.isArray(body.entries) ? body.entries
+    : Array.isArray(body.experts) ? body.experts
+      : Array.isArray(body.personas) ? body.personas
+        : Array.isArray(body.items) ? body.items : []
+  out.catalogCount = entries.length
+  out.catalogSample = entries.slice(0, 3).map((entry) => ({ id: entry.id ?? entry.personaId, name: entry.name ?? entry.title }))
+  if (browser === undefined) { out.mention = { ok: false, reason: '浏览器层没起来' }; return out }
+  /**
+   * ⚠️ 这一步**必须先把页面带回一个真实会话**：P10 实测里它常常紧接着模型层失败（页面停在
+   * 专家管理 / 新建弹窗上）⇒ `no-composer`，把"通道在位"误报成红。所以：关弹窗 → 点侧栏第一条会话
+   * → 等 composer 出现；仍没有才 `ok:false`，并把 DOM 现场一并记下来（不猜）。
+   */
+  out.mention = await (async () => {
+    const readComposer = () => browser.evaluate(`
+      const el = document.querySelector('[data-composer-input="true"]');
+      if (el === null) {
+        return {
+          ok: false,
+          reason: 'no-composer',
+          dialogs: document.querySelectorAll('.wb-dialog').length,
+          sessionItems: document.querySelectorAll('[role="treeitem"]').length,
+          mainText: (document.querySelector('main')?.textContent ?? '').trim().slice(0, 80),
+        };
+      }
+      return { ok: true, placeholder: el.getAttribute('data-placeholder') || '' };
+    `).catch((error) => ({ ok: false, reason: `evaluate 失败：${error instanceof Error ? error.message : String(error)}` }))
+    const first = await readComposer()
+    if (first.ok === true) return first
+    out.mentionFirstTry = first
+    await browser.evaluate(`
+      const dialog = document.querySelector('.wb-dialog');
+      if (dialog !== null) {
+        const buttons = Array.from(dialog.querySelectorAll('button'));
+        const cancel = buttons.find((b) => /取消|关闭|暂存|继续让 AI 修改/.test((b.textContent || '').trim()));
+        if (cancel !== undefined) cancel.click();
+      }
+      return true;
+    `).catch(() => undefined)
+    await sleep(1000)
+    await browser.evaluate(`
+      const items = Array.from(document.querySelectorAll('[role="treeitem"]'));
+      const target = items.find((el) => (el.textContent || '').trim() !== '');
+      if (target !== undefined) target.click();
+      return items.length;
+    `).catch(() => undefined)
+    await sleep(5000)
+    const second = await readComposer()
+    return second.ok === true ? { ...second, recoveredBy: 'clicked-sidebar-session' } : { ...second, firstTry: first }
+  })()
+  return out
+}
+
+// ── AX-E60-b / E61 / E62 的通道前置 ─────────────────────────────────────────
 async function checkModelLayer() {
-  report.layers.model = {}
-  const observed = await tryObserveModelToolCalls()
-  report.layers.model = observed
+  report.layers.model = { notes: [], calls: [] }
+  const generation = await runExpertGenerationProbe()
+  report.layers.model.generation = generation
+  report.layers.model.calls = modelCallLog.slice()
+
+  const findings = generation.findings ?? {}
+  const verdict = findings.verdict ?? {}
+  const offered = findings.session?.expertGenerationToolsOffered ?? null
+  /** 会话记录里真的能被模型看到这 5 个工具（`request/header` 的实测清单，不是源码推断）。 */
+  const allFiveOfferedObserved = verdict.allFiveOffered === true
+  const offeredCount = Array.isArray(findings.session?.toolsOffered) ? findings.session.toolsOffered.length : null
+
   suite.check({
-    id: 'AX-E60 ⭐ 真实模型调用专家草稿提交工具并落库（模型链路）', axId: 'AX-E60', layer: 'B',
-    skipped: observed.ok !== true,
-    ok: observed.ok === true,
-    skipReason: `未观察到真实模型工具调用：${observed.reason}（草稿生命周期与"确认前正式库为空"已在 H 层用真实 HTTP + 真实 FS/DB 证明；本层按规格记未验证，不记 pass）`,
-    detail: safeJson(observed).slice(0, 1500),
+    id: 'AX-E60 ⭐ 真实模型调用专家草稿提交工具并落库（模型链路：独立会话 + JSONL 工具调用 + 目标库复读）', axId: 'AX-E60', layer: 'B',
+    ok: generation.ok === true,
+    skipped: generation.ok !== true,
+    skipReason: generation.ok === true ? undefined
+      : `未观察到真实模型工具调用：${generation.reason}。原始证据：${(findings.notes ?? []).slice(-3).join('；')}（草稿生命周期与"确认前正式库为空"已在 H 层用真实 HTTP + 真实 FS/DB 证明；本层按规格记未验证，不记 pass。"提示词是不是产品自己发的"另由下面那条 AX-E60 判据单独判）`,
+    detail: safeJson({
+      request: findings.request,
+      requestChars: findings.requestChars,
+      dispatchPath: findings.dispatchPath,
+      dispatchWaitedMs: findings.runified?.waitedMs,
+      turnWaitedMs: findings.turnWaitedMs,
+      session: findings.session === undefined ? null : {
+        sessionId: findings.session.sessionId,
+        key: findings.session.key,
+        cwd: findings.session.cwd,
+        parentSession: findings.session.parentSession,
+        delegationDepth: findings.session.delegationDepth,
+        events: findings.session.events,
+        frames: findings.session.frames,
+        failedFrames: findings.session.failedFrames,
+        userMessageCount: findings.session.userMessageCount,
+        toolsOfferedCount: findings.session.toolsOfferedCount,
+        expertGenerationToolsOffered: findings.session.expertGenerationToolsOffered,
+        model: findings.session.model,
+      },
+      calls: findings.calls,
+      draftRow: findings.draftRow,
+      userLibrary: findings.expertInUserLibrary,
+      verdict,
+      allFiveOffered: allFiveOfferedObserved,
+      modelCalls: modelCallLog,
+    }).slice(0, 4000),
   })
+
+  /**
+   * ⭐ P11 新增：把「提示词是**产品**发出去的」从 E60 里**拆出来单独判**。
+   *
+   * 为什么必须单独一条：E60 的 `ok` 只看"真实模型真的调了工具 + 目标库草稿行真的推进"，
+   * 而套件里存在一条**手工补发**的兜底通道（`readPluginGenerationPrompt` 逐字复刻 +
+   * 真实 composer 发送）。P10 的 4280 字符 prompt 就是这么发出去的 —— 于是
+   * "用户点「开始生成」什么都不会发生"这个**真实功能缺陷**依然让 E60 亮绿灯。
+   *
+   * 这条断言堵的就是它（不许登记进 `ALLOWED_REQUIRED_SKIPS`）：
+   * - `dispatchPath === 'plugin-queued'`（被追踪会话的 JSONL 里出现了**产品自己**那条 `user/message`）→ **pass**；
+   * - `dispatchPath === 'composer-fallback'`（套件靠人手补发才看到模型）→ **fail**，detail 里写明手工补发；
+   * - 探针根本没走到"判派发通道"这一步（`dispatchPath` 缺失）→ 如实 `skip` + 具体原因。
+   */
+  const dispatchPath = findings.dispatchPath
+  const dispatchJudged = typeof dispatchPath === 'string' && dispatchPath !== ''
+  const pluginDispatched = dispatchPath === 'plugin-queued'
+  suite.check({
+    id: 'AX-E60 ⭐ 点「开始生成」后由产品自己把提示词发给模型（不靠人手补发）', axId: 'AX-E60', layer: 'B',
+    ok: pluginDispatched,
+    skipped: dispatchJudged === false,
+    skipReason: dispatchJudged === false
+      ? `探针没有走到"判派发通道"这一步（dispatchPath 缺失）：${generation.reason}`
+      : undefined,
+    detail: safeJson({
+      dispatchPath: dispatchJudged ? dispatchPath : null,
+      expected: 'plugin-queued',
+      manualResendBySuite: dispatchPath === 'composer-fallback',
+      verdictNote: pluginDispatched
+        ? '通过：被追踪会话的 JSONL 里出现了**产品自己**那条 user/message（不是套件手工补发的）'
+        : dispatchPath === 'composer-fallback'
+          ? '不通过：套件靠**手工补发**（把逐字复刻的插件 prompt 打进真实 composer）才看到模型 —— 产品自己的派发通道没有被证明可用，用户点「开始生成」走不到这条路'
+          : '不通过：预算内没在被追踪会话的 JSONL 里看到产品自己那条 user/message',
+      dispatchWaitMs: findings.pluginDispatch?.waitedMs ?? null,
+      dispatchBudgetMs: findings.pluginDispatch?.budgetMs ?? null,
+      dispatchSamples: findings.pluginDispatch?.samples ?? null,
+      /** 探测到那一刻套件发过几次真实 prompt：**0** 才能证明"不是人打的"。 */
+      suiteModelCallsAtDetection: findings.pluginDispatch?.suiteModelCallsAtDetection ?? null,
+      firstUserMessage: findings.pluginFirstUserMessage ?? null,
+      firstUserMessageSource: '被追踪生成会话自己的 session.v*.jsonl.zstd（多帧 zstd 逐帧解压）',
+      uiError: findings.uiError ?? null,
+      userMessageCount: findings.session?.userMessageCount ?? null,
+      modelCalls: modelCallLog,
+    }).slice(0, 2500),
+  })
+
+  /**
+   * ⚠️ 这条**另记一条**（不是 E60 的重复）：E60 判的是"工具真的被调用 + 草稿落库"，
+   * 它可能因为"宿主没派发 prompt"而 skip；而"模型到底有没有被交付这 5 个生成工具 schema"
+   * 是**同一份会话记录里另一个字段**（`request/header.data.header.tools[]`），
+   * 只要会话真的开跑过一轮就能判，并且它正是"插件注册的 5 个生成工具在真实会话里可见"这条规格。
+   */
+  suite.check({
+    id: 'AX-E60-b ⭐ 真实会话的 request/header 里逐个交付了 5 个专家生成工具（模型真的被给了这些 schema）', axId: 'AX-E60', layer: 'B',
+    ok: allFiveOfferedObserved === true,
+    skipped: allFiveOfferedObserved !== true && offeredCount === null,
+    skipReason: allFiveOfferedObserved === true ? undefined
+      : `生成会话没有开出可判的一轮（${generation.reason}）`,
+    detail: safeJson({
+      sessionId: findings.session?.sessionId ?? null,
+      userMessages: findings.session?.userMessageCount ?? 0,
+      toolsOfferedCount: offeredCount,
+      expected: EXPERT_GENERATION_TOOL_NAMES,
+      offered,
+    }).slice(0, 1500),
+  })
+
+  // ── AX-E61：@ 专家 B 的通道前置（真实 HTTP + 真实 composer）────────────────────
+  const mention = await probeExpertMentionChannel()
+  report.layers.model.mention = mention
+  const catalogReady = (mention.catalogCount ?? 0) > 0
+  suite.check({
+    id: 'AX-E61-a ⭐ 真实 HTTP + 真实 composer：`@` 专家引用通道在位（catalog 有可引用专家、页面有 composer）', axId: 'AX-E61', layer: 'B',
+    ok: catalogReady === true && mention.mention?.ok === true,
+    detail: safeJson({ catalogStatus: mention.catalogStatus, catalogCount: mention.catalogCount, catalogSample: mention.catalogSample, composer: mention.mention }).slice(0, 1200),
+  })
+  /**
+   * E61 的**模型后半**（父绑定 A → `@` B 发送 → 子代理走 loader → 父仍为 A）需要：
+   * 一次真实的父会话轮次（模型调 `workbench_run_expert_request`）+ 一个**可引用**的专家
+   *（`@` 源只列 catalog 里带 `sourceKey` 的角色）+ 一次子代理轮次（模型先调
+   * `workbench_load_invoked_expert`），然后还要证明**父会话绑定仍是 A**。
+   *
+   * ⚠️ P10 更正（P9 的交接口径里有一条**不成立**的阻塞）：「本机用户角色库里一位已发布专家都没有
+   * ⇒ `@` 没有可引用对象」是**错的**。实测 `@` 源的可引用集合来自
+   * `expertCandidatesFromCatalog(catalog.personas)`（`src/client/expertInputSource.ts:174-194`，
+   * 只要 `id` + `sourceKey` 非空即可），而本机 catalog 里有 **15 位包内置角色**，
+   * 且 `POST /experts/preflight` 对 `domain/engineering/dotnet-代码审查官` 实测返回
+   * `usable: true / preliminary: true` —— 也就是说**不装任何专家也能引用内置角色**，
+   * 「必须确认安装一位专家」并不是这条的前置。
+   *
+   * 真正的阻塞是**预算**：这一条要烧掉 ≥3 次真实模型调用（父轮 + 子代理轮 + 判"父仍为 A"的那一轮），
+   * 而本批的调用预算（`MODEL_CALL_BUDGET = 6`）已经全部用在 AX-E60 的生成通道上（见 `modelCalls`）。
+   * 如实记 skip，不假通过；**不要**为了变绿去登记 `ALLOWED_REQUIRED_SKIPS`。
+   */
+  const e61Blockers = []
+  if (catalogReady === false) e61Blockers.push(`catalog 没有可引用专家（HTTP ${String(mention.catalogStatus)}，entries=${String(mention.catalogCount)}）`)
+  if (mention.mention?.ok !== true) e61Blockers.push(`页面没有 composer（${safeJson(mention.mention)}）`)
+  e61Blockers.push(`真实模型调用预算已用尽：本层共发出 ${modelCallsMade} 次 / 上限 ${MODEL_CALL_BUDGET}（明细见 modelCalls），而这一条至少还要 3 次（父轮 + 子代理轮 + 复核父绑定轮）`)
   suite.check({
     id: 'AX-E61 ⭐ 真实模型：父绑定 A 时 @ 专家 B，子代理走专用 loader 且父仍为 A（模型链路）', axId: 'AX-E61', layer: 'B',
-    skipped: observed.ok !== true,
     ok: false,
-    skipReason: `需要真实模型链路才能观察到子代理调用与父绑定不变：${observed.reason}`,
-    detail: '本层的 H 层部分（manual-requests 只建请求、不写绑定）已单独记 pass；端到端的父绑定不变需要真实模型会话',
+    skipped: true,
+    skipReason: `端到端模型后半的阻塞：${e61Blockers.join('；')}。可复现的通道前置已单记 AX-E61-a（真实 HTTP catalog 15 位可引用内置角色 + 真实 composer）；父绑定不变的静态面（src/experts/invocation.ts 任何路径都不写绑定）与 manual-requests 只建请求不写绑定已在 H 层单独记 pass`,
+    detail: safeJson({ catalogStatus: mention.catalogStatus, catalogCount: mention.catalogCount, catalogSample: mention.catalogSample, composer: mention.mention, modelCalls: modelCallLog }).slice(0, 1500),
+  })
+
+  // ── AX-E62：auto 开关的真实读写 + 关闭后工具清单的消失面 ──────────────────────
+  /**
+   * 这一条的模型后半需要**两轮真实会话**（开 → 自主召唤；关 → 下一轮不再有 `summon_expert`）。
+   * P10 实测的注册面：`summon_expert` 只在
+   * `ctx.tools.register(summonExpertTool(...))` 生效后出现（`src/index.ts:581-612`），
+   * 且它要求宿主有可用的 subagent provider；**开着开关真的发一轮会再烧掉 ≥2 次真实模型调用
+   * 与一个子代理**，而本批的调用预算（`MODEL_CALL_BUDGET = 6`）已全部用在 AX-E60 的生成通道上
+   *（见 `modelCalls`）。开关真值可读性单记 AX-E62-a（真实 HTTP
+   * `GET /api/workbench/experts/capabilities` → `autoSummon.{available,enabled}`），
+   * 「关闭后该轮无自主 schema/prompt」的静态面（开关关闭时 `tools.register` 与 systemPrompt 段都撤销）
+   * 如实记未验证，不假通过。
+   */
+  const autoSwitch = await sessionApi.get('/api/workbench/experts/capabilities').catch(() => undefined)
+  const autoSummonEnabled = autoSwitch?.body?.autoSummon?.enabled
+  const autoSummonAvailable = autoSwitch?.body?.autoSummon?.available
+  report.layers.model.autoSummon = autoSwitch?.body?.autoSummon ?? null
+  suite.check({
+    id: 'AX-E62-a ⭐ 真实 HTTP：auto 开关真值可读、`summon_expert` 的注册面与开关同一真源', axId: 'AX-E62', layer: 'B',
+    ok: autoSwitch?.status === 200 && typeof autoSummonEnabled === 'boolean' && typeof autoSummonAvailable === 'boolean',
+    detail: safeJson({
+      endpoint: 'GET /api/workbench/experts/capabilities',
+      capabilitiesStatus: autoSwitch?.status,
+      autoSummon: autoSwitch?.body?.autoSummon,
+      metaKey: 'expert_auto_summon（真值唯一来源：src/experts/service.ts:1077 autoSummonEnabled）',
+      registration: 'src/index.ts:581-612 —— 只有 enabled===true 且 selectSpawnProvider 成功才 register(summon_expert) + systemPrompt 段',
+    }).slice(0, 1200),
   })
   suite.check({
     id: 'AX-E62 ⭐ 真实模型：auto=true 自主召唤、关闭后该轮无自主 schema/prompt（模型链路）', axId: 'AX-E62', layer: 'B',
-    skipped: observed.ok !== true,
     ok: false,
-    skipReason: `需要真实模型链路才能观察自主工具调用与"关闭后下一轮 schema/prompt 消失"：${observed.reason}`,
-    detail: 'auto 开关的真实值读写已在 H/B 层证据里；"模型真的自主挑专家"需要真实模型会话',
+    skipped: true,
+    skipReason: `需要**两轮真实模型会话**（开→自主召唤；关→下一轮 request/header 的 tools[] 里不再有 summon_expert）才能观察到：本批真实模型调用预算已用在 AX-E60 的生成通道（本层共发出 ${modelCallsMade} 次；上限 ${MODEL_CALL_BUDGET}），且自主召唤还会再起一个子代理。开关真值可读性已单记 AX-E62-a（真机 autoSummon.enabled=${String(autoSummonEnabled)}）；"关闭后该轮无自主 schema"的静态面（src/index.ts:581-612 的 effect 在开关关闭时 tools.register 与 systemPrompt 段都撤销）如实记未验证`,
+    detail: safeJson({ autoSummon: autoSwitch?.body?.autoSummon, modelCalls: modelCallLog }).slice(0, 1500),
   })
 }
 
