@@ -226,6 +226,7 @@ const sent = { expectedVersion: payload.contentVersion, manifestHash: validation
 7. 真宿主各走一遍降级：缺 `sessions.create`、缺 methodology 资产。
 8. catalog 拉取失败时只降级 `/expert` 帮助，不让命令整体不可用。
 9. 真机核对 §7-11（设置页专家列表的布局变化）是否符合预期。
+10. **rebase 前置（P8 收尾时新发现，务必先看）**：`origin/main` 已从 `fb2b548` 前进到 **`7980493`**（+6 提交，来自另一会话的 PR 合并），其中 **3 个提交改了同一份 `src/client/index.tsx`**（`848ad0b +5`、`9cf7a37` 整文件行尾翻转 `1978/1972`、`a7d927a` 再次 `1978/1978`）⇒ 我方 P8 的 `+65 −2` 与它在同一文件上**必然冲突**；重放时以他们的行尾为准、只打我们的三段装配改动，rebase 后重做 CR/BOM 全量检查。另外上游 `05fea07` / `7980493` 已修 `test/db.test.mjs` 的临时目录清理，**P5–P8 一直报的"全仓唯一失败（db EPERM）"预期在 rebase 后消失**。
 
 ---
 

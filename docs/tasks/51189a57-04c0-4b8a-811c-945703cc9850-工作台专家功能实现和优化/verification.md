@@ -545,7 +545,7 @@ dry-run 通过、目标不等于当前实例且任务已有测试实例授权后
 | `node --test test/expertClientFlow.test.mjs test/clientInvariants.test.mjs test/capabilities.test.mjs test/draftBannerSessionJump.test.mjs` | 0 | `tests 56 / pass 56 / fail 0` |
 | `node --test test/*.test.mjs`（全仓） | 1 | `tests 1282 / pass 1281 / fail 1`（duration 约 12 s） |
 
-全仓唯一失败与 P5/P6/P7 基线同源、非本批引入：`test/db.test.mjs` 的 "db migrations, dictionaries and task tree"（临时目录清理期 `EPERM`）。计数核对：P7 基线 1244 + 本批新增 38（`test/expertClientFlow.test.mjs` 全部用例）= **1282** ✓。子代理首轮曾报"全仓连跑第二次会多出 4 条假失败"（AX-E48 / AX-R04 / draft defer-resume-abandon API / PATCH `/tasks/:id`），主会话复跑时未复现；那 4 个文件本批一个未碰。
+全仓唯一失败与 P5/P6/P7 基线同源、非本批引入：`test/db.test.mjs` 的 "db migrations, dictionaries and task tree"（临时目录清理期 `EPERM`）。**收尾复核补充**：`origin/main` 已前进到 `7980493`，其中 `05fea07` 与 `7980493` 正是修这条（"清理临时目录不再抛错，避免 finally 顶替真正的断言失败"）⇒ 本批的"1 fail"是**本地基线**的真实状态，P9 rebase 到新 `origin/main` 后预期归零。计数核对：P7 基线 1244 + 本批新增 38（`test/expertClientFlow.test.mjs` 全部用例）= **1282** ✓。子代理首轮曾报"全仓连跑第二次会多出 4 条假失败"（AX-E48 / AX-R04 / draft defer-resume-abandon API / PATCH `/tasks/:id`），主会话复跑时未复现；那 4 个文件本批一个未碰。
 
 ### 15.2 AX-E52–E58
 
