@@ -118,7 +118,8 @@ console.log(JSON.stringify(counts));
 | P1 类型/设置/字典种子/路径与来源校验 | ✅ 2026-10-05 已执行 | 见 §8；typecheck 0 / build 0 / expert 三件套 43 pass / 回归 80 pass，AX-E01–E06 全 pass。原状态“未实现”保留于此 |
 | P2 草稿提交/分文件暂存/整包校验 | ✅ 2026-10-05 已执行 | 见 §9；typecheck 0 / build 0 / P2 三件套 77 pass / 回归 105 pass，AX-E07–E14 全 pass。原状态“未实现”保留于此 |
 | P3 安装/受管发布门/中断恢复 | ✅ 2026-10-05 已执行 | 见 §10；typecheck 0 / build 0 / 11 个测试文件 207 pass 0 fail，AX-E15–E23 全 pass；含 17 个故障点矩阵与 4 例跨进程真崩溃。原状态“未实现”保留于此 |
-| P4–P5 生成会话与调用接线 | 未实现 | 无产品运行结果 |
+| P4 skill provider / catalog / 运行前依赖预检 | ✅ 2026-10-05 已执行 | 见 §11；typecheck 0 / build 0 / P4 三件套 45 pass / 回归 207 pass，AX-E24–E30 与 AX-E49 的 scope 前置全 pass；另有真实安装器 → 真实 provider 的独立字节级证据。原状态“未实现”保留于此 |
+| P5 生成会话与调用接线 | 未实现 | 无产品运行结果 |
 | P6–P7 专家调用主链 | 未实现 | 无产品运行结果 |
 | P8 客户端界面 | 未实现 | 无浏览器结果 |
 | P9 包/真实 SDK/真实 LLM | 未执行 | 不以 fake provider 代替 |
@@ -346,3 +347,59 @@ dry-run 通过、目标不等于当前实例且任务已有测试实例授权后
 - 偏差 4：`install.after-validation` 的异常原样抛给调用方（该点在补偿 try 之外，磁盘/DB 零改动）→ 强化了 10.5 的接线义务 ②。
 - 偏差 5：未预期异常统一回 `install-repair-required`；中断型补偿 `lastInstallError.code='canceled'`。
 - 过程事实：P3 由**同一子代理分两轮**完成（第一轮 1914 行 install.ts + managed.ts + 12 test；第二轮 +13 test 与 1 处缺陷修复），两轮都经主会话独立复跑（194 → 207）与逐段源码复核。第一轮过程中撞到两个真缺陷（draft mutex 重入被自己挡住导致 11 例全红；外层 catch 漏认 `InstallFailure`），均已修；测试侧另有 3 处用例自身问题（sessionId 复用串味、journal 目录未建、漏 import），如实记录。
+
+## 11. P4 施工记录（2026-10-05 执行）
+
+### 11.1 命令与退出码（主会话独立复跑）
+
+同一条命令内顺序执行（外部会话的 `scripts/repro/probe-*-mutations.mjs` 会 `rmSync('lib')`，分开跑会赛跑）：
+
+| 命令 | 退出码 | 输出 |
+|---|---|---|
+| `pnpm typecheck` | 0 | 无输出 |
+| `pnpm build` | 0 | buildId `wb-7fb1c7f63bec2961`（195 输入文件；client 552.64 kB） |
+| `node --test test/expertProvider.test.mjs test/expertCatalog.test.mjs test/skills.test.mjs` | 0 | `ℹ tests 45 / pass 45 / fail 0 / skipped 0`（18 provider + 12 catalog + 15 存量） |
+| `node --test`（11 个回归文件） | 0 | `ℹ tests 207 / pass 207 / fail 0` |
+| `node <evidence/p4-provider-real-install.mjs>` | 0 | `11/11 PASS`、临时根已清理 |
+
+子代理曾自报一次回归抖动（`test/personaLibrary.test.mjs` AX-R06 报 undici `bad port`），主会话两次独立复跑均**未复现**，该文件本批未改。
+
+### 11.2 AX-E24–E30 / E49 对账
+
+| 断言 | 结论 | 证据 |
+|---|---|---|
+| AX-E24 未 ready 受管技能不进 list/get；补 publication 后立即可见 | ✅ | `test/expertProvider.test.mjs:302` |
+| AX-E24 坏包只记诊断（YAML 坏/name 不符/旧驼峰键/链接/非目录/坏目录名） | ✅ | 同上 `:354` |
+| AX-E24 完整性字段（`complete`、abort 立即返回空） | ✅ | 同上 `:413` |
+| **AX-E24 清单 hash 复核（本批修复轮新增）** | ✅ | 同上 `:423`/`:447`/`:479`/`:520`/`:542` + 真实安装产物证据（11.4） |
+| AX-E25 同层 rank 400 胜 600、只走 `registerProvider` | ✅ 消费侧 | 同上 `:435`/`:476` |
+| AX-E26 真实 `scopeOf` 解析 / 跨层胜出 | ✅ SDK 实测 + ⚠️ 仲裁为模拟注册表 | 同上 `:506`/`:517` |
+| AX-E27 候选变动 → get undefined + invalidate，不偷换正文 | ✅ | 同上 `:590` |
+| AX-E28 安装后无需重启即可发现 / 换代后旧控制器作废 | ✅ 消费侧 | 同上 `:640`/`:677` |
+| AX-E29 目录行与状态优先级（含 installation-incomplete 压过 invalid/disabled） | ✅ | `test/expertCatalog.test.mjs:268`/`:397`/`:421` |
+| AX-E30 依赖预检三例 + 坏清单 + 清单一致判可用 | ✅ | 同上 `:442`/`:497`/`:527`/`:570` |
+| AX-E49 scope 前置（helper 缺失/抛错 → `skill-scope-unavailable`，preflight 绝不判通过） | ✅ | 同上 `:630` + `test/expertProvider.test.mjs:552` |
+| §7.3 投影保真（provider/source/rank/locator；坏条目丢弃） | ✅ | 同上 `:738` |
+| AX-E48 自主召唤开关 off→on→off | 未验证（P6 范围） | 本批只交 `buildAutoExpertPrompt`，未注册进 systemPrompt |
+
+### 11.3 交付物
+
+新增 `src/experts/skill-provider.ts`（673）、`src/experts/host-adapter.ts`（404）、`src/experts/catalog.ts`（963）、`test/expertProvider.test.mjs`（933，18 test）、`test/expertCatalog.test.mjs`（780，12 test）、`test/fixtures/expertSkillFixture.mjs`（72）；修改 `package.json`（peer + `peerDependenciesMeta` optional + devDependency `@deepseek-ai/dsh-scope` 0.2.0-rc.2）、`pnpm-lock.yaml`（+3 行）、`tsconfig.build.json`（include +3）。**未改** `src/index.ts` / `src/tools.ts` / `src/api/**` / `src/client/**`；P1–P3 源文件零改动。逐字签名与接线义务见 `P4-handover.md` §2 与 §9。
+
+### 11.4 独立证据：真实安装器 → 真实 provider
+
+仓库测试的 `workbench-install.json` 是夹具构造的（用产品自己的 `hashSkillPackage` 算真哈希），所以"健康包被列出"在测试里带自证成分。`docs/tasks/ed644638-…/evidence/p4-provider-real-install.mjs`（**不属于仓库测试**）用真实草稿链（create → submit → stage×4 → validate → confirm）装一个含子目录许可副本与点开头文件 `.notes.txt` 的受管技能，再喂给真实 provider：**清单 `packageHash` 与候选 `locator.packageHash` 逐字相等**；清单 `files[]` 的 bytes/sha256 与磁盘真实字节相符；手改 `SKILL.md` → list 空 + `skill-package-invalid` + 伪造 locator 的 get 也拿不到（invalidate 恰好 1 次）；删掉 `.notes.txt` → 同样拒绝；全部还原 → 重新可见；根外哨兵未变。实跑 `11/11 PASS`、退出码 0。
+
+### 11.5 规格偏差与过程事实
+
+- 偏差 1【记录未改】：`duplicate-id-overridden` 的诊断行给 `status='disabled'`+`enabled:false`（§9.1 状态枚举无"被覆盖"档，两个方向都是撒谎，取"存在但不生效"并保留 issues 原文）。
+- 偏差 2【记录未改】：`invalid` 只可能出现在诊断行（winner 行来自解析成功且发布门已放行的文档）；五级优先级在两类行合起来的意义上完整成立。
+- 偏差 3【记录未改】：`readPendingInstallNote` 只读扫 `.pending/*/install-journal.json`（仓库没有"列出全部 expert 草稿"的函数），失败静默跳过。
+- 偏差 4【记录未改】：`sourceKey` 反查复用 `sourceKeyForRoot`，反查不到落 `'user'`（理论不可达）。
+- 偏差 5【记录未改】：`buildAutoExpertPrompt` 走 `checkSkills:false` —— 摘要不是权限证明，真正执行仍走完整异步 `preflightExpert`。
+- 偏差 6【记录未改】：`scopeOf` 成功但返回 `undefined` 时投影记 `preliminary:true`（比 §7.3 更保守）；**P5 不得把 `preliminary` 当"不可用"**。
+- **过程事实 1（真缺陷，已修）**：`isLinkEntry` 兜底用 `statSync`（跟随链接）→ 对 `Dirent` 未标出的 junction 永远 `false`，安全网为空；改 `lstatSync` 并补语义前提用例。此条**无反向注入**（真实文件系统造不出该形状），只有本机实测 `Dirent=true / lstat=true / statSync=false` + 代码论证。
+- **过程事实 2（真缺陷，已修 + 反向注入）**：受管技能的清单 hash 从未被消费 → 安装后手改/增删文件仍会被当受管版本列出与 get。已加比对（`src/experts/skill-provider.ts:438`）。反向注入把该条件改 `if (false)`：`tests 30 / pass 28 / fail 2`，只有两条篡改用例红；还原后 45/45，探针残留 0。
+- **过程事实 3（连带口径不一致，已修）**：`walkSkillPackage` 原跳过包内点开头文件，而安装器的 `packageHash` 覆盖它写入的每个文件（`src/experts/paths.ts:148` 只拒 `.`/`..` 整段）→ 含 `.foo.txt` 的**合规**包会被永久误判；已去掉包内跳过（副作用：更严）。
+- **过程事实 4（夹具必须同步）**：两个测试文件的 `workbench-install.json` 原用合成哈希（`packageHash: HEX`，catalog 连 `files[].sha256` 也是 `HEX`）；修复后会被正确判成"被改过"。新增 `test/fixtures/expertSkillFixture.mjs`（真实哈希）后，**原有 24 条用例的断言文本一字未改**。
+- **过程事实 5**：P4 由**同一子代理分两轮**完成（第一轮三源文件 + 39 test；第二轮两项修复 + 夹具真实化 → 45 test），两轮都经主会话独立复跑与逐段源码复核；未接生产装配（属 P5/P8），未执行安装/重启/发布。
