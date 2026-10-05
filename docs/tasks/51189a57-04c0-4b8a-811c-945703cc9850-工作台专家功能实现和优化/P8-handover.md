@@ -9,7 +9,9 @@
 
 ## 1. 交付物
 
-全部在分支 `feat/workbench-experts` 上，基线 `0bdd80a`（P7）。**18 个文件**（4 新增 + 14 修改），全部 `CR=0`、无 BOM、以 LF 结尾。
+全部在分支 `feat/workbench-experts` 上，基线 `0bdd80a`（P7；**rebase 后 P7 = `2e98177`**）。本批提交 `3db046c`（**rebase 后为 `7089d4b`**）。**18 个文件**（4 新增 + 14 修改），全部 `CR=0`、无 BOM、以 LF 结尾。
+
+> **2026-10-05 同步更新（主会话执行）**：本批完成后按用户指令先同步再开 P9，`git rebase --autostash origin/main` 零冲突，本文件引用的提交哈希与 buildId 均已被改写 —— 映射与复跑结果见 [执行日志](ed644638-f9a0-45cf-a32f-90df7d060dda-工作台专家功能实现和优化/执行日志.md) 的「同步到 origin/main」一节与 `verification.md` §5.1。**buildId `wb-d130ed707d64a654` 已作废，新值为 `wb-8181274a3900fe0b`**；全仓测试基线从 1282/1281/1 变 **1289/1289/0**。§10 第 10 条（rebase 前置）**已执行完毕**，不再是待办。
 
 ### 新增
 
@@ -226,7 +228,7 @@ const sent = { expectedVersion: payload.contentVersion, manifestHash: validation
 7. 真宿主各走一遍降级：缺 `sessions.create`、缺 methodology 资产。
 8. catalog 拉取失败时只降级 `/expert` 帮助，不让命令整体不可用。
 9. 真机核对 §7-11（设置页专家列表的布局变化）是否符合预期。
-10. **rebase 前置（P8 收尾时新发现，务必先看）**：`origin/main` 已从 `fb2b548` 前进到 **`7980493`**（+6 提交，来自另一会话的 PR 合并），其中 **3 个提交改了同一份 `src/client/index.tsx`**（`848ad0b +5`、`9cf7a37` 整文件行尾翻转 `1978/1972`、`a7d927a` 再次 `1978/1978`）⇒ 我方 P8 的 `+65 −2` 与它在同一文件上**必然冲突**；重放时以他们的行尾为准、只打我们的三段装配改动，rebase 后重做 CR/BOM 全量检查。另外上游 `05fea07` / `7980493` 已修 `test/db.test.mjs` 的临时目录清理，**P5–P8 一直报的"全仓唯一失败（db EPERM）"预期在 rebase 后消失**。
+10. ~~**rebase 前置（P8 收尾时新发现，务必先看）**~~ **已执行（2026-10-05）**：本条描述的冲突**没有发生**——`git rebase --autostash origin/main` 9/9 干净应用、零冲突，P1–P8 代码逐行未变，CR=0 复核通过；下游影响（哈希、buildId、全仓失败数）见本文件开头 2026-10-05 同步更新与 `verification.md` §5.1。以下是**执行前**的原始预告，保留作过程痕迹：`origin/main` 已从 `fb2b548` 前进到 **`7980493`**（+6 提交，来自另一会话的 PR 合并），其中 **3 个提交改了同一份 `src/client/index.tsx`**（`848ad0b +5`、`9cf7a37` 整文件行尾翻转 `1978/1972`、`a7d927a` 再次 `1978/1978`）⇒ 我方 P8 的 `+65 −2` 与它在同一文件上**必然冲突**；重放时以他们的行尾为准、只打我们的三段装配改动，rebase 后重做 CR/BOM 全量检查。另外上游 `05fea07` / `7980493` 已修 `test/db.test.mjs` 的临时目录清理，**P5–P8 一直报的"全仓唯一失败（db EPERM）"预期在 rebase 后消失**。
 
 ---
 

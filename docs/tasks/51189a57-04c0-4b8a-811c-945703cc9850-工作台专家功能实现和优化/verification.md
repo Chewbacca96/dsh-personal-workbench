@@ -123,9 +123,17 @@ console.log(JSON.stringify(counts));
 | P6 专家调用主链（请求 / 子代理按需人格 / 回传与释放） | ✅ 2026-10-05 已执行 | 见 §13；typecheck 0 / build 0 / P6 三件套 33 pass / 专家域回归 80 pass，AX-E36–E44、E48 全 pass，AX-E49 通过但其中"真实 skills 服务根因"标未验证；主会话另做并发位反向注入（AX-E44 变红）。原状态"未实现"保留于此 |
 | P7 手动入口（`@` / `/expert` / `POST manual-requests`） | ✅ 2026-10-05 已执行 | 见 §14；typecheck 0 / build 0 / P7 三件套 40 pass / 专家域回归 146 pass / 全仓 1244 tests 1243 pass 1 fail（唯一失败是既有 db.test.mjs 清理期 EPERM，单跑亦失败）、AX-E45–E47 与 E51 全 pass；主会话另做 disposed 守卫反向注入（2 条断言变红，还原后逐字节一致）。真实宿主里的 `@` 菜单点击与 serialize 抛错时宿主 UI 行为**未验证**（留 P8/集成验收）。原状态"未实现"保留于此 |
 | P8 客户端界面（生成入口 / 专家管理 / 专家草稿横幅） | ✅ 2026-10-05 已执行 | 见 §15；typecheck 0 / build 0 / P8 四件套 56 pass / 全仓 1282 tests 1281 pass 1 fail（唯一失败是既有 db.test.mjs 清理期 EPERM）、AX-E52–E58 全 pass；主会话另做 picker 第二道闸门反向注入（AX-E56 变红，还原后逐字节一致）。**无浏览器结果**：DOM 渲染、点击、真实宿主 `sessions.create`、真实 LLM 与真实安装落地全部未验（留 P9）。原状态"未实现"保留于此 |
-| P9 包/真实 SDK/真实 LLM | 未执行 | 不以 fake provider 代替 |
+| P9 包/真实 SDK/真实 LLM | 🔶 2026-10-05 拟交付（**未提交**） | 见 §16；新建白名单套件 `scripts/verify/suites/expert.mjs`（**1115 行** / sha256 `C569DFAC…E65D`，CRLF=0）覆盖 AX-E59–E62 并补齐 P8 的 B 层（AX-E52–E58 真实浏览器 DOM/点击），`expert` 已登记 `active` + `required:true`。单跑 **29 pass / 0 fail / 3 skip**（3 条 skip 全是真实模型层）；`check-verify-scripts` 0；`pnpm test` 0（tests 1289 / pass 1289 / fail 0）；真实链 13 阶段跑到 suites（health `1.16.5 / buildId wb-8181274a3900fe0b / schema 19`）。**真实模型链路未验证**（本机无可用 web-profile headless 入口，如实 skip、不伪造），按口径 `required + skipped` ⇒ **链在 suites 阶段判不通过**。**主会话独立复核**：单跑复现 29/0/3；独立清点 tgz（311 条目 / 2 648 241 字节 / methodology 1 / `lib/experts/**` 24 / `lib/**` 280 / personas 15 / 许可 3 / 禁止项 0 / 真实本机路径泄漏 0）；对 `_local-build/current.tgz` 做**反向注入**（抽掉 `assets/expert-generation/methodology.md` 后重打包）⇒ AX-E59-a 变红，还原后 sha256 逐字节一致；缺 `--db-path` 误调用时 H 层真读 SQLite 并如实报错（`no such table: task_drafts`）而非假绿。原状态“未执行 / 不以 fake provider 代替”保留于此 |
 
 每批追加日期、git/build ID、命令、退出码、AX-E 编号、pass/fail/unverified/blocked 与证据路径。不要改写此前失败记录来伪装连续通过。
+
+### 5.1 同步到 origin/main（2026-10-05 已完成，rebase 改写提交哈希）
+
+用户指令后（原话 m02387：「那就先同步，然后开始P9」）先同步再开 P9。`git fetch origin` 0 → `git branch backup/p8-pre-rebase 3db046c` → `git rebase --autostash origin/main` **0（9/9 干净、零冲突）**；`origin/main` 当时为 `39baf4e8c2dcfa1c2ec3a94d9f7e04993455e99a`，分支相对它是 **9 ahead / 0 behind**（未 push）。
+
+**哈希映射（旧 → 新；本文档与各 handover 里引用的旧值以此表为准）**：P1 `a63b6cb`→`30a9b58`、P2 `7bf40a5`→`33866cb`、P3 `4db0310`→`bf94e67`、P4 `0ca0a6d`→`b4e06d0`、P5 `146992f`→`a424d4e`、P6 `74e5b27`→`900d3d2`、P7 `0bdd80a`→`2e98177`、P8 `3db046c`→`7089d4b`、分叉文档 `7342c42`→`a327aa8`。
+
+rebase 后主会话独立复跑：`pnpm typecheck` **0**、`pnpm build` **0**（buildId **`wb-8181274a3900fe0b`**，206 输入）、全仓 `node --test test/*.test.mjs` = **tests 1289 / pass 1289 / fail 0**（上游修掉 `test/db.test.mjs` EPERM，P5–P8 的唯一失败消失）。**§8–§15 里引用的旧 buildId（`wb-d130ed707d64a654` 等）已被 rebase 作废**；`git diff --stat backup/p8-pre-rebase..HEAD` 证明 P1–P8 代码内容逐行未变。完整过程见 [执行日志](ed644638-f9a0-45cf-a32f-90df7d060dda-工作台专家功能实现和优化/执行日志.md) 的「同步到 origin/main」一节。
 
 ## 6. 独立研发实例命令与授权边界
 
@@ -572,3 +580,59 @@ dry-run 通过、目标不等于当前实例且任务已有测试实例授权后
 ### 15.6 未验证项（如实标注，不填通过）
 
 8 条见 `P8-handover.md` §8，核心是：**无真浏览器/GUI**（DOM 渲染、点击、弹窗视觉、真实 DOM 里的 `data-wb-expert-*` 取值只做源码级唯一性断言）；**无真实宿主**（`sessions.create` / `acquireSession` / `uiWorkspace.openSession` 全用假 runtime，`SessionCreateError` 的真实抛法未跑）；**无真实 LLM**（generation-start / validate / confirm 全用假 HTTP 响应）；**无真实安装落地**（journal / publication / 文件写入 / skill provider 生效属 P5–P6 覆盖）；**未起宿主点 `@` 菜单与 `/expert`**（P7 遗留）；**auto 开关对自主召唤行为的真实影响未验**（只验了值写对与失败回滚）；**未重启实例**；**macOS/Linux 未测**。
+
+## 16. P9 施工记录：出口批次（真实打包产物 / 独立宿主 / 真实 HTTP 与浏览器）
+
+### 16.1 交付物（**未提交、未 push**；只碰 3 个验证脚本 + 3 个文档）
+
+| 文件 | 状态 | 行数 | sha256（大写） |
+|---|---|---|---|
+| `scripts/verify/suites/expert.mjs` | 新增 | 1115 | `C569DFAC6BBB416FA2B7AF3BC35F80871167225B9911C44A428A7B97E7F5E65D` |
+| `scripts/verify/suites.json` | 修改（`+14 −0`） | 221 | `A75345861925F21238803EB69D69D8757FD4A08D0B23D335C2CA0537F67AD48F` |
+| `scripts/verify/suites/progress.mjs` | 修改（`+53 −1`，**只加诊断**） | 341 | `A8FCF8299A2B53228237776DAE71DE9C69E997393EFD51E08C6CEFD1972BFAC6` |
+
+三个文件全部 `CRLF=0`、无 BOM、LF 结尾。**没有改**：`src/**`、`test/**`、`package.json`、`pnpm-lock.yaml`、
+`scripts/dev-verify.mjs`、`scripts/verify/runtime.mjs`、`scripts/verify/suites/_harness.mjs`、`docs/adr/**`
+（`0009-*.md` 仍为 **proposed**）。
+
+### 16.2 套件分层与 AX 覆盖
+
+`expert` 已登记进 `scripts/verify/suites.json`（`active` + `required:true` + `axIds:["AX-E59","AX-E60","AX-E61","AX-E62"]`，列表**末位**）。
+
+- **U 层（包与静态）**：AX-E59 —— 本次 tgz 的条目清单、包内版本、该有的都有（方法论 / `lib/experts/**` 24 个 / `lib/**` 280 个 / personas 15 篇 / 3 份许可）、不该有的都没有（`.pending`/`test`/`test-results`/`_local-build`/`_local-archive`/`browser-temp`/`src`/`*.log`）、300 个文本条目的绝对路径与 UNC 泄漏扫描 0 命中。
+- **H 层（真实 HTTP + 跨进程 DB 真值）**：AX-E60 的草稿生命周期（capabilities / methodology / generation-start / drafts 读回 / **直读 `task_drafts` 证明 pending 且正式库零新增** / abandon 带版本 CAS）；AX-E61 的 preflight + manual-requests（200 建请求 / 身份不符 **400 `revision-changed` + `expected_source_key`**）；AX-E54/E55 的 validate（真跑 + 过期版本 **409**）；AX-E56 的 catalog 形状。
+- **B 层（真实浏览器 DOM 与点击）**：AX-E52（`create` 入口 → 真实点开 `create-modal` → 空文本禁用 → **清空工作区**后禁用且出 `data-wb-expert-error="no-workspace"` → 选回解禁）、AX-E54（无「创建任务」假文案）、AX-E56（`data-wb-experts="admin"` 可见 + 15 行都带 `data-wb-expert-id`/`status`）、AX-E57（auto 开关字段）、AX-E58（点弹窗自己的「取消」→ DOM 卸载但管理根与 catalog 状态仍在）。7 张截图证据在 `<runId>/suite-expert/`。
+- **模型层**：AX-E60（模型落库那一半）/ AX-E61（子代理 loader + 父绑定不变）/ AX-E62（自主召唤开关因果）**如实 skip**。
+
+### 16.3 独立实例证据（真实链，退出码 1）
+
+最终一次链（**去掉 `--dry-run`**，实参见 §6 的三段命令）：证据包
+`test-results/workbench-verify/20261005-212614-a85655/`（195798ms，11 份 `suite-*.json`）。
+
+- health：**`版本 1.16.5 / buildId wb-8181274a3900fe0b / schema 19`**；`buildIdentity` 三方一致、`matched:true`、`mismatches:[]`。
+- 每套件：verify-safety 20/0/0、legacy-acceptance 18/0/0、legacy-final-2 9/0/0、legacy-sidebar-collapse 6/0/0、legacy-duplicate-task 11/0/0、progress 13/0/0、daily-effort 13/0/0、day-panel 11/0/0、workspace-picker 8/0/0、persona 12/0/1、**expert 29/0/3**。
+- `sideEffects`：`{"installed":true,"restarted":true,"dbWrites":0,"browsersOpened":0,"tempDirsRemoved":1}`。
+- **退出码 1 的唯一原因**逐字：`必需套件 expert 有 3 项被跳过且未登记：AX-E60…｜AX-E61…｜AX-E62…`（`scripts/dev-verify.mjs:455-494` 的 required-skip 规则；`ALLOWED_REQUIRED_SKIPS` 在 `:74-80`，当前只有 persona 一条）。**按 P9 第 1 条「不许新增隐式 skip 白名单」刻意不登记**。
+- 同一条链的另一轮（`…/20261005-212017-46dbe5/`，模型层口径修正前）逐套件计数**逐条相同**；另有 **2 次**在 `legacy-acceptance` 被浏览器层掐断（`…/20261005-211823-3cc7dc/`：45s 内没渲染出侧栏入口；`…/20261005-212429-c6d805/`：`Page.captureScreenshot` 30s 超时），单跑该套件立刻 18/18 ⇒ 与本批无关的冷启动竞态，已列未验证项。
+
+### 16.4 包清单核验（逐字计数）
+
+`_local-build/dsh-personal-workbench-dev-a327aa8-20261005-212021.tgz`，**2648241 字节 / 311 条目**，包内版本 `1.16.5`。
+三次链打出的 tgz 字节数完全一致（2648241）⇒ 打包是输入决定的。该有的：方法论 `assets/expert-generation/methodology.md`、`lib/experts/**` **24**、`lib/**` **280**、personas **15**、许可 **3**；不该有的：`.pending`/`test`/`test-results`/`_local-build`/`_local-archive`/`browser-temp`/`src`/`*.log` **全部 0**；泄漏扫描 **300 个文本条目、0 命中**。
+
+### 16.5 规格偏差、复核与修复
+
+- **本批修的全是"我的断言错"**（4 轮）：`draft.id`→`draftId`；manual-requests 身份不符 **400** 不是 409；点「设置」要限定 `.wb-h button`（全局文案匹配命中了宿主侧栏的设置）；「填了文本仍禁用」在真机假红（工作区下拉初值非空）⇒ 改三步判。
+- **一条我自己造成的跨套件污染（已修）**：`POST /api/workbench/drafts/:id/abandon` **必须带 body**（`src/api/routes/drafts.ts:291-346`：无 body → 400 `invalid-json`，缺 `expectedVersion` → 400 `invalid-payload`），旧写法恒 400 ⇒ 专家草稿永远 pending ⇒ `DraftBanner`（`DraftBanner.tsx:669`，5 秒轮询）弹出「待确认：新建专家」盖住**同一条链后面** `progress` 套件的进度卡（偶发 2 条假红；诊断 `preClick.hitAtCenter="HEADER:待确认：新建专家"`、`hitIsTheButton:false`；截图 `%TEMP%\p9-flake1-evidence\suite-progress\03-详情-点25后.png`）。修法：带 `{expectedVersion}` + 判据「200 且 DB 复读已不是 pending 且正式库零新增」+ `finally` 安全网。修完 `progress` 13/13。
+- **模型层口径修正**：第一版用 `DSH_VERIFY_EXPERT_MODEL !== '1'` 直接返回"未开启" ⇒ 等于用环境变量把必需套件的关键层**静默关掉**（P9 明令禁止隐式 skip 白名单）。已改为**默认就去尝试**，只有"没给目标 profile / 找不到 dsh bin"才提前返回；最终链证据里因此留下了真机结论（见 16.6）。
+- **`progress.mjs` 的 `+53 −1` 全是诊断字段**（`report.after25`），判定与阈值未改。
+- **反向注入**：本批**没有**做产品源码的反向注入（没改产品代码），真红来自"断言口径写错时链真的红"（§16.5 第 1 条与跨套件污染那条都是先真红再修的）。
+
+### 16.6 未验证项（如实标注，一律不算通过）
+
+1. **真实模型链路**：最终链里套件默认执行了 spawn，真机结论逐字 —— `probed[0]={"kind":"dsh headless","profile":"web","code":1,"stdoutBytes":0,"stderrTail":"error: unknown option '--json'\n"}`，`reason`：「本机没有可用的 web-profile headless 入口（退出码 1；stderr: error: unknown option '--json'）：`headless` 在本机 DSH 里是 profile 名而非 web profile 的子命令，真实模型链路需走目标实例自己的会话 API，本次未实现」。证据：`<runId>/suite-expert/model-run-stderr.txt`（31 字节）、`model-run-stdout.txt`（0 字节）。⇒ 结论按施工计划第 9 条：**实现检查通过、模型链路未验证**。
+2. AX-E53 五条失败路径在**真实链**上未跑（P8 注入式单测覆盖）。
+3. auto 开关对真实自主召唤行为的**因果**未验（只验了渲染与语义）。
+4. 生成内容质量（原创专家人格正文是否可用）未验。
+5. 卸载/重装/升级路径、macOS/Linux 未测。
+6. 链的稳定性：4 次真实链里 2 次被浏览器冷启动竞态掐断（§16.3），未定位确定性根因。
