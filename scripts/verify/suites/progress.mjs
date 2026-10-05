@@ -188,12 +188,64 @@ try {
   suite.check({ id: '详情卡有进度输入框（0–99，不夹取）', axId: 'AX-P07', layer: 'B', ok: inputPresence.hasInput === true && inputPresence.placeholder === '0–99', detail: safeJson(inputPresence) })
 
   // ── AX-P07-d 真实鼠标点「25%」→ 接口重读确实是 25 ────────────────────────
+  /**
+   * ⚠️ 2026-10-05 补：点之前先量一次「这一下到底会落在谁身上」。
+   * 历史假红里最贵的一类是"点了没生效"——它有三种完全不同的原因
+   * （按钮 disabled / 坐标被 sticky 头遮住 / 事件没到达），
+   * 而事后只看"值没变"分不出来。所以把命中测试与 disabled 态一起写进证据。
+   */
+  const preClick = await browser.evaluate(`
+    const card = document.querySelector('.wb-progress-card');
+    const btns = Array.from(card?.querySelectorAll('.wb-progress-presets button') ?? []);
+    const b25 = btns.find((b) => (b.textContent || '').includes('25%'));
+    const r = b25?.getBoundingClientRect();
+    const cx = r === undefined ? null : Math.round(r.left + r.width / 2);
+    const cy = r === undefined ? null : Math.round(r.top + r.height / 2);
+    const at = cx === null ? null : document.elementFromPoint(cx, cy);
+    return {
+      buttons: btns.length,
+      disabled: b25?.disabled ?? null,
+      submitDisabled: card?.querySelector('button[type=submit]')?.disabled ?? null,
+      center: cx === null ? null : { x: cx, y: cy },
+      inViewport: r === undefined ? null : (r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth),
+      hitAtCenter: at === null || at === undefined ? null : ((at.tagName || '') + ':' + (at.textContent || '').trim().slice(0, 12)),
+      hitIsTheButton: at === b25,
+    };
+  `)
   const clicked25 = await browser.clickByText('25%', '.wb-progress-presets button')
   if (clicked25 === null) suite.require({ id: '真实点击「25%」预设', axId: 'AX-P07', layer: 'B', detail: '找不到 25% 按钮' })
+  /**
+   * ⭐ 决定性诊断（2026-10-05 真机抓到的那条假红就靠它定性）：
+   * `clickByText` 量的是**它自己**算出来的中心点，点完之后在那个点上做一次命中测试，
+   * 就能分辨"点被别的东西吃了"和"点了但没生效"。
+   * 实测形态：落点是一个 header「待确认：新建专家」——另一套件遗留的 pending 专家草稿
+   * 被 5 秒轮询弹成的浮层盖住了进度卡（根因在 expert 套件的 abandon 缺 `expectedVersion`，
+   * 已在那侧修掉；这里留下读数，下次再出现不必重跑四轮找原因）。
+   */
+  const hitAtClickedPoint = await browser.evaluate(`
+    const x = ${Math.round(clicked25?.x ?? -1)};
+    const y = ${Math.round(clicked25?.y ?? -1)};
+    const at = x < 0 || y < 0 ? null : document.elementFromPoint(x, y);
+    const card = document.querySelector('.wb-progress-card');
+    const b25 = Array.from(card?.querySelectorAll('.wb-progress-presets button') ?? []).find((b) => (b.textContent || '').includes('25%'));
+    return {
+      atClickPoint: at === null || at === undefined ? null : ((at.tagName || '') + ':' + (at.textContent || '').trim().slice(0, 16)),
+      isTheButton: at === b25,
+      blocker: at === null || at === b25 ? null : (at.closest('header,[role=dialog],[class*=banner],[class*=draft]')?.className ?? null),
+    };
+  `)
   await sleep(1500)
   const after25Api = await api.get(`/api/workbench/tasks/${parent.id}`)
   const after25Dom = await browser.evaluate(READ_DETAIL)
-  report.after25 = { api: after25Api.body?.task?.progressPercent, dom: after25Dom.percent }
+  const after25Diag = await browser.evaluate(`
+    const card = document.querySelector('.wb-progress-card');
+    return {
+      error: card?.querySelector('.wb-progress-error')?.textContent ?? null,
+      input: card?.querySelector('input[aria-label="进度百分比（0–99）"]')?.value ?? null,
+      busyDisabled: Array.from(card?.querySelectorAll('.wb-progress-presets button') ?? []).map((b) => b.disabled),
+    };
+  `)
+  report.after25 = { api: after25Api.body?.task?.progressPercent, dom: after25Dom.percent, preClick, clickChannel: clicked25?.clickChannel ?? null, hitAtClickedPoint, after25Diag }
   await browser.screenshot(`${suite.dir}/03-详情-点25后.png`)
   suite.check({
     id: '真实鼠标点「25%」后：接口重读 25 且 DOM 同步显示 25%', axId: 'AX-P07', layer: 'B',

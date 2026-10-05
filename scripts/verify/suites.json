@@ -188,6 +188,20 @@
         "AX-R08"
       ],
       "reason": "S17-N/V05：AX-R07/R08；H 层用真实 HTTP 证明绑定/加载语义，B 层验真实选择器，M 层需要真实模型链路（拿不到就 skip，链判 required+skipped=不通过）。"
+    },
+    {
+      "id": "expert",
+      "kind": "new",
+      "required": true,
+      "status": "active",
+      "repoPath": "scripts/verify/suites/expert.mjs",
+      "axIds": [
+        "AX-E59",
+        "AX-E60",
+        "AX-E61",
+        "AX-E62"
+      ],
+      "reason": "P9 出口批次：AX-E59–E62；U 层对**本次链真实打包的 tgz**核验清单与泄漏（复用 scripts/lib/tarReader.mjs），H 层用真实 HTTP + 真实 SQLite/文件系统证明草稿生命周期与「用户确认前正式库为空」，B 层真实浏览器 DOM+点击补 P8 遗留的 AX-E52–E58，M 层需要真实模型链路（拿不到就 skip，链判 required+skipped=不通过）。"
     }
   ],
   "deprecated": [
