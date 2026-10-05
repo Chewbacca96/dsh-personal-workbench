@@ -11,9 +11,15 @@
  * | POST | `/api/workbench/experts/drafts/:id/validate` | `{expectedVersion}` → 草稿 + validation |
  * | GET | `/api/workbench/experts/drafts/:id/file` | `area` / `path` 查询参数 → 该草稿索引里的一个文本文件 |
  * | POST | `/api/workbench/experts/preflight` | `{personaId, sessionId?}` → 可用性预检 |
+ * | POST | `/api/workbench/experts/manual-requests` | `{sessionId, personaId, expectedSourceKey, expectedRevision}` → 手动调用请求（P7） |
  *
- * **P6 的 `POST /experts/manual-requests` 刻意不在这里**：P5 没有子代理调用，
- * 端点若存在就必须"看起来可用"，那正是 §10 降级口径失真的来源。
+ * **P6 的 `POST /experts/manual-requests` 当时刻意不在这里**：P5 没有子代理调用，
+ * 端点若存在就必须"看起来可用"，那正是 §10 降级口径失真的来源。P7 补上它 ——
+ * 但**只建请求、不执行**：`runManual` 依然只由工具执行上下文触发（§4.1 首段的
+ * "HTTP 只能查看/编辑/确认，不直接启动专家子代理"）。
+ *
+ * **`loadForChild` / `readForChild` 永远没有 HTTP 入口**（P6 交接 §9-3）：ticket 只走工具参数，
+ * 任何响应体里都不出现它。
  *
  * ## 硬约束
  *
@@ -90,6 +96,29 @@ export function makeExpertRoutes(db: DatabaseSync, service: ExpertService | unde
             optionalText(body, 'sessionId', MAX_ID_CHARS)
             const result = await service.preflight(personaId)
             return writeJson(res, 200, { ok: true, ...result })
+          }
+          /**
+           * `POST /experts/manual-requests`（P7 / §4.1）：**只建请求，不执行**。
+           *
+           * 为什么 `expectedSourceKey` / `expectedRevision` 是必填：`createManualRequest`
+           * 建请求时当场比对**当前**人格身份（§8.5 第 11 步），不符就 `revision-changed` 且
+           * **一条请求都不建**。让浏览器端先拿 preflight 的 `summary` 再提交，是为了把
+           * "面板显示 → 用户点发送"这段时间里的人格变更变成一次**显式失败**，
+           * 而不是让用户以为叫来的是他刚才看到的那个专家。
+           *
+           * 身份入参一律走既有 `requireText`（trim 后 1–512）：长度/空值口径与其它端点一致，
+           * 失败抛服务层同一个 `ExpertServiceError`（`invalid-payload` → 400，唯一投影口）。
+           */
+          if (head === 'manual-requests') {
+            if (method !== 'POST') return methodNotAllowed(res)
+            const body = await readBody(req, res)
+            if (body === undefined) return
+            const sessionId = requireText(body, 'sessionId', MAX_ID_CHARS)
+            const personaId = requireText(body, 'personaId', MAX_ID_CHARS)
+            const expectedSourceKey = requireText(body, 'expectedSourceKey', MAX_ID_CHARS)
+            const expectedRevision = requireText(body, 'expectedRevision', MAX_ID_CHARS)
+            const created = service.createManualRequest({ sessionId, personaId, expectedSourceKey, expectedRevision })
+            return writeJson(res, 200, { ok: true, requestId: created.requestId, expiresAt: created.expiresAt })
           }
           if (head === 'drafts' && typeof second === 'string' && second !== '') {
             if (third === undefined) {

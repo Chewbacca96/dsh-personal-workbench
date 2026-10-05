@@ -121,7 +121,7 @@ console.log(JSON.stringify(counts));
 | P4 skill provider / catalog / 运行前依赖预检 | ✅ 2026-10-05 已执行 | 见 §11；typecheck 0 / build 0 / P4 三件套 45 pass / 回归 207 pass，AX-E24–E30 与 AX-E49 的 scope 前置全 pass；另有真实安装器 → 真实 provider 的独立字节级证据。原状态“未实现”保留于此 |
 | P5 生成会话与调用接线 | ✅ 2026-10-05 已执行 | 见 §12；typecheck 0 / build 0 / P5 四件套 43 pass / 专家域回归 45 pass / 全仓 1195 tests 1194 pass 1 fail（唯一失败是既有 db.test.mjs 清理期 EPERM）、AX-E31–E35 与 AX-E50 全 pass；另有真实 HTTP 全链独立证据 38/38 与 `pnpm pack` 产物核验。原状态“未实现”保留于此 |
 | P6 专家调用主链（请求 / 子代理按需人格 / 回传与释放） | ✅ 2026-10-05 已执行 | 见 §13；typecheck 0 / build 0 / P6 三件套 33 pass / 专家域回归 80 pass，AX-E36–E44、E48 全 pass，AX-E49 通过但其中"真实 skills 服务根因"标未验证；主会话另做并发位反向注入（AX-E44 变红）。原状态"未实现"保留于此 |
-| P7 手动入口（`@` / `/expert` / 命令 / 面板） | 未实现 | 无浏览器结果 |
+| P7 手动入口（`@` / `/expert` / `POST manual-requests`） | ✅ 2026-10-05 已执行 | 见 §14；typecheck 0 / build 0 / P7 三件套 40 pass / 专家域回归 146 pass / 全仓 1244 tests 1243 pass 1 fail（唯一失败是既有 db.test.mjs 清理期 EPERM，单跑亦失败）、AX-E45–E47 与 E51 全 pass；主会话另做 disposed 守卫反向注入（2 条断言变红，还原后逐字节一致）。真实宿主里的 `@` 菜单点击与 serialize 抛错时宿主 UI 行为**未验证**（留 P8/集成验收）。原状态"未实现"保留于此 |
 | P8 客户端界面 | 未实现 | 无浏览器结果 |
 | P9 包/真实 SDK/真实 LLM | 未执行 | 不以 fake provider 代替 |
 
@@ -491,3 +491,43 @@ dry-run 通过、目标不等于当前实例且任务已有测试实例授权后
 ### 13.6 未验证项（如实标注，不填通过）
 
 8 条见 `P6-handover.md` §8，核心是：**真实宿主 provider / 真 `SubagentRuntime` / 真 LLM 全部未跑**（时序、dispose 幂等、stopReason 取值、child header 字段、`persona` 严格插值、`ToolRuntime` 对未知 deny 名的 loud 拒绝都只对着忠实假实现验证过）；**真实 skills 服务的 `skill-scope-unavailable` 根因未验证**；**真 cordis 热重载未验证**；**`subagents` 服务"晚到"不会重同步**（只在设置变化时 `sync()`）；**P7 UI 与真实 19387 实例未跑**；macOS/Linux 未测。
+
+---
+
+## 14. P7 施工记录（2026-10-05 执行）
+
+### 14.1 命令与退出码（主会话独立复跑，同一条命令链）
+
+| 命令 | 退出码 | 计数 / 结果 |
+|---|---|---|
+| `pnpm typecheck` | 0 | — |
+| `pnpm build` | 0 | buildId `wb-56b6a671db50d923`（203 个输入文件）；`lib\client.js` 559.78 kB / gzip 166.22 kB |
+| `node --test test/expertInputSource.test.mjs test/expertCommand.test.mjs test/capabilities.test.mjs` | 0 | `tests 40 / pass 40 / fail 0` |
+| `node --test` 专家域 9 文件 | 0 | `tests 146 / pass 146 / fail 0` |
+| `node --test test/*.test.mjs`（全仓） | 1 | `tests 1244 / pass 1243 / fail 1`（duration 约 11.2 s） |
+
+全仓唯一失败与 P5/P6 基线同源、非本批引入：`test/db.test.mjs` 的 "db migrations, dictionaries and task tree"，单独跑也失败（`tests 9 / pass 8 / fail 1`），错误为 `Error: EPERM, Permission denied: \\?\C:\Users\ADMINI~1\AppData\Local\Temp\dsh-personal-workbench-db-KXtbln`（临时目录清理期）。`test/verifySafety.test.mjs:351` 会打一行带 `✖` 前缀的诊断文本，但它不在 failing tests 列表、不计入 `fail`。基线推算 P5 `1195 / 1194 / 1` + P6 16 + P7 34 = 期望 1245，实测 1244（差 1 条纯计数差，未追根因，不影响断言结论）。
+
+### 14.2 AX-E45–E47 / E51
+
+逐条证据（用例名与行号）见 `P7-handover.md` §6。结论：**AX-E45（8 条）、AX-E46（7 条）、AX-E47（11 条）、AX-E51（3 条）全 ✅**。其中 AX-E45/E46 的"源不抢文件仲裁"、"inputTriggers 缺失不注册"、"跨会话只认 ref 的 sessionId"、"serialize 失败绝不回落成普通文本"都各有会失败的断言守着；`expertCommand.test.mjs:312-320` 真起 `http.createServer` + `server.listen(0,'127.0.0.1')` + `fetch` 打真端点验 `POST /experts/manual-requests` 契约。
+
+### 14.3 交付物
+
+新增 `src/experts/command.ts`（253 行）、`src/client/expertPrompt.ts`（85 行）、`src/client/expertInputSource.ts`（580 行）、`test/expertInputSource.test.mjs`（566 行，16 条）、`test/expertCommand.test.mjs`（425 行，18 条）；修改 `src/api/routes/experts.ts`（`+31 −2`，新增 `manual-requests` 分支）、`src/index.ts`（`+45 −2`，新增 `registerExpertCommand`）、`src/client/index.tsx`（`+14 −1`，一行装配）、`tsconfig.build.json`（`+3` include）。10 个相关文件全部 CR=0 且以 LF 结尾。顶层 `inject` 逐字未变（4 项），`src/client/capabilities.ts` 逐字未变（5 项，sha256 `0C5326113D5606B9BE0781139999BD20D76EBDD6869B603DB8226818ACC430EF`）；未加任何依赖；ticket 无 HTTP 出口；`SCHEMA_VERSION` 未动。
+
+### 14.4 独立证据（主会话亲自执行）
+
+- **反向注入（主会话另挑一处）**：删掉 `src/client/expertInputSource.ts` 里 `register()` 的 `if (disposed) return` 守卫 → `build 0` 但 `node --test` 两文件 = `tests 33 / pass 31 / fail 2`；还原后 sha256 = `FF3C3F9D11B9988365BB03E1345FF914A00C802BEF068EF1632831ACFFBD8640`（与注入前逐字节相同，也与子代理自报前缀一致）。→ 生命周期守卫由**会失败的断言**守住。
+- **diff 逐行读完**（4 个已跟踪文件合计 `+93 −5`），**三个新模块全文通读**（85 + 253 + 580 行）：未发现功能缺陷，故本批没有修复轮，只做 §14.5 的两处小修。
+- **注释引用核对**：`EXPERT_INVOCATION_DIRECTIVE` 5 行与 `方案-v0.3.md:654-660` 逐字一致；`src/index.ts:246-249` 确是 `/workbench` 的 steer 调用点；`dsh-commands/lib/types/index.d.ts:54` 确是 `readonly handler: (invocation: CommandInvocation) => CommandResult | Promise<CommandResult>`。
+
+### 14.5 规格偏差、复核与修复
+
+5 条偏差逐条列在 `P7-handover.md` §7（其中 **`serialize` 先 `preflight` 再 `manual-requests`** 是主会话复核时新识别的：超出 §8.3 字面顺序，但正是 P6 交接 §9-2 与 AX-E46"身份变动即拒"的要求，代价是提交时多一次 HTTP 往返；另 4 条为"两条不可达分支删除"、"`command.ts` 的 tsconfig include 冗余但保留"、"入口装配收进一行"、"端点常量集中一处"）。
+
+两处小修（均为格式/注释，无行为变更）：①`src/client/index.tsx` 新段后多余空行删除（1986 → 1985 行）；②`src/experts/command.ts:232` 注释的 steer 出处由 `src/index.ts:209-212` 更正为 `src/index.ts:246-249`，并注明 `createUserMessage` 自 `src/index.ts:9` 起即既有 import 口径（⇒ 该文件 sha256 由 `CFF465BA…41D1C` 变为 `A3E1DA683F2A85D2E56CE80FE04EB127882B0F5F0CC43C573E4EC2081A7D4F24`）。修完重跑全绿（`typecheck 0` / `build 0` / 三件套 40/40 / 专家域 146/146）。
+
+### 14.6 未验证项（如实标注，不填通过）
+
+8 条见 `P7-handover.md` §8，核心是：**真实宿主未跑**（未起 19387、未点 `@` 菜单，源并列/引用胶囊/`onPick` 后的 ref 呈现只对着假 `host` 验过）；**`codec.serialize` 抛错时宿主的 UI 行为未验证**（"保留输入并阻止发送"属宿主契约）；**跨会话复制的拒绝未端到端验证**（`manual-request-session-mismatch` 属 P6/服务端）；**真实 `agent.steer` 与 `CommandInvocation.agent` 真实形状未跑**；**`pnpm test` 全量脚本未跑**（用等价 `node --test test/*.test.mjs`）；**真实 provider / 真 `SubagentRuntime` / 真 LLM 全部未跑**（同 P6）；**macOS/Linux 未测**。

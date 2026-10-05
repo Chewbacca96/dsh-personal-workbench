@@ -32,6 +32,7 @@ import type { TeamMemoryService } from './review-memory.js'
 import { taskWorkspaceFolderName } from './client/taskFolder.js'
 import { loadPersonaTool, proposeDailyPlanTool, proposeIdeaClustersTool, proposeSubtasksTool, readPersonaResourceTool, requestCompletionTool, saveTaskMemoryTool, submitIdeaTasksTool, submitKnowledgeTool, submitReportTool, submitReviewTool, submitTaskTool, updateProgressTool, updateTaskTool, type PersonaDependencyPreflight } from './tools.js'
 import { AUTO_EXPERT_PROMPT_BLOCK_NAME, AUTO_EXPERT_PROMPT_ORDER, buildAutoExpertPrompt } from './experts/catalog.js'
+import { expertCommandDefinition } from './experts/command.js'
 import { probeExpertSkills, probeExpertSubagents, selectSpawnProvider } from './experts/host-adapter.js'
 import { createExpertService, type ExpertService } from './experts/service.js'
 import { registerWorkbenchSkillProvider, type SkillRegistrarLike, type WorkbenchSkillRegistration } from './experts/skill-provider.js'
@@ -116,11 +117,22 @@ interface CommandDefinitionProbe {
   readonly name: string
   readonly description: string
   readonly input?: { readonly hint: string; readonly attachments?: boolean }
-  readonly handler: (invocation: { readonly agent?: AgentProbe; readonly rawInput?: string }) => { readonly kind: 'success' | 'error'; readonly text: string }
+  /**
+   * 真实 d.ts 是 `(invocation: CommandInvocation) => CommandResult | Promise<CommandResult>`
+   * （`@deepseek-ai/dsh-commands` 0.2.0-rc.2 的 `types/index.d.ts:54`）。
+   *
+   * `/workbench` 的 handler 仍然**同步**返回（行为逐字未变）；`/expert` 需要
+   * `await service.preflight(...)` 才能拿到建请求要用的 `sourceKey`/`revision`（§8.4 + P6 交接 §9-2），
+   * 所以这里把返回类型放宽到与宿主一致 —— 不放宽的话 `/expert` 会因类型不符而编译不过。
+   */
+  readonly handler: (invocation: { readonly agent?: AgentProbe; readonly rawInput?: string }) =>
+    { readonly kind: 'success' | 'error'; readonly text: string }
+    | Promise<{ readonly kind: 'success' | 'error'; readonly text: string }>
 }
 
-/** `dsh-agent` 的 Agent 上我们只用到 `steer`（把一条用户消息送进当前会话）。 */
+/** `dsh-agent` 的 Agent 上我们只用到 `session.id`（身份）与 `steer`（把一条用户消息送进当前会话）。 */
 interface AgentProbe {
+  readonly session?: { readonly id?: unknown }
   readonly steer?: (message: unknown) => void
 }
 
@@ -148,6 +160,31 @@ function registerWorkbenchCommand(ctx: Context, db: DatabaseSync): void {
     return
   }
   ctx.effect(() => commands.register(workbenchCommandDefinition(db)), 'dsh-personal-workbench: command')
+}
+
+/**
+ * 注册 `/expert` 斜杠命令（P7 / §8.4）。
+ *
+ * 与 `registerWorkbenchCommand` **同一层、同一写法**：`ctx.effect` 包住
+ * `commands.register(...)` 的 disposer，因此热重载 / 卸载时注册会被完整摘掉
+ * （AX-E51 的"命令只有一份、disposer 完整"）。拿不到 `commands` 时打一条可读日志、
+ * **不抛**：`/workbench` 与其它功能照常可用。
+ *
+ * 命令本体在 `src/experts/command.ts`（纯解析 + 工厂），这里只是装配外壳 ——
+ * 与 `/workbench` 的分工完全一致（`workbenchCommandDefinition` 也是单独导出给单测直接驱动的）。
+ */
+function registerExpertCommand(ctx: Context, db: DatabaseSync, experts: ExpertService): void {
+  const commands = probeService<CommandsProbe>(ctx, 'commands')
+  if (commands === undefined || typeof commands.register !== 'function') {
+    const notice = '[dsh-personal-workbench] 未注册 /expert 命令：宿主没有提供 commands 服务。'
+    ctx.logger?.warn?.(notice)
+    console.warn(notice)
+    return
+  }
+  ctx.effect(
+    () => commands.register(expertCommandDefinition(db, { experts })),
+    'dsh-personal-workbench: expert-command',
+  )
 }
 
 /**
@@ -634,6 +671,12 @@ function applyReady(ctx: Context, db: DatabaseSync, config: Config): void {
 
   // `/workbench` 斜杠命令：走宿主原生命令注册（→ 原生 `/` 菜单），不自建 DOM 补全浮层。
   registerWorkbenchCommand(ctx, db)
+  /**
+   * `/expert` 斜杠命令（P7 / §8.4）：与 `/workbench` **同一层**注册。
+   * 语法 ` /expert <persona-id> -- <任务>`；它只建**同一条**手动 request 并把指令 steer 进本会话，
+   * 真正的执行仍由模型调 `workbench_run_expert_request` → `runManual`（不另开 start 路径）。
+   */
+  registerExpertCommand(ctx, db, experts)
 
   // 提醒调度：用 ctx.interval（随 fiber 自动销毁）。
   // 注意：ctx.interval 由 @deepseek-ai/cordis-plugin-timer 提供，且**必须声明 inject** 才能访问

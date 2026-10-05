@@ -49,6 +49,7 @@ import { startOfDay
 import type { DshSessionSummary, Task, WorkbenchRuntime
 } from './viewTypes.js'
 import { currentSessionIdOf, getPluginCtx, optionalService, safeService, setPluginCtx } from './runtimeServices.js'
+import { installExpertInputSource } from './expertInputSource.js'
 import { decideSidebarWidth, decideTopInset, pickFrameCandidate } from './panelGeometry.js'
 import { indexModalities, type ModelModalityRecord
 } from './modelCapability.js'
@@ -1325,7 +1326,8 @@ export function apply(ctx: unknown): () => void {
   const notifyOpenChange = (): void => { for (const listener of openListeners) { try { listener() } catch { /* 单个订阅者出错不影响其它 */ } } }
   ensureStyle()
 
-  /** 清理幂等标记：`disposePreviousInstance()` 与 cordis 都可能调用清理。 */
+  /**
+   * 清理幂等标记：`disposePreviousInstance()` 与 cordis 都可能调用清理。 */
   let disposed = false
   const officialDisposers: Array<() => void> = []
   const styleObserver = new MutationObserver(() => {
@@ -1333,6 +1335,17 @@ export function apply(ctx: unknown): () => void {
   })
   styleObserver.observe(document.head, { childList: true })
 
+  /**
+   * `@` 专家引用源（P7 / §8.3）：**一行装配**，实现全在 `expertInputSource.ts`。
+   *
+   * 为什么不在入口里展开写（本文件有"不许再涨"的红线，也不该在这里攒第二份注册时序）：
+   * 装配与清理时序收在模块里之后，入口只剩这一行；`inputTriggers` 也**不进**客户端
+   * `inject`（那是 5 项精确清单）：没装那个能力的机器上写进 inject 会让**整个面板 pending** ——
+   * 丢整块面板换一个 `@` 源，不可逆的不对称成本。拿不到服务时"这个源不注册"，
+   * `/expert` 命令与其它功能照常可用（AX-E46）。
+   */
+  const disposeExpertInput = installExpertInputSource(ctx)
+  officialDisposers.push(disposeExpertInput)
 
   /**
    * 挂载官方 `main` 面板的内容（由注册给宿主的组件 ref 回调调用）。
