@@ -22,6 +22,7 @@
 import type { DraftView } from '../../shared/contracts.js'
 import type { ExpertIssue, ExpertSkillRequirement, ExpertSource } from '../../shared/expert.js'
 import type { ExpertDraftButtons, ExpertDraftPayloadRead } from '../hooks/useWorkbenchExperts.js'
+import { useI18n } from '../i18n.js'
 
 const CREATION_KIND_LABELS: Record<string, string> = {
   translated: '译文（来自上游人格）',
@@ -89,6 +90,7 @@ export interface ExpertDraftBodyProps {
 }
 
 export function ExpertDraftBody(props: ExpertDraftBodyProps): JSX.Element {
+  const { t } = useI18n()
   const { draft, payload, buttons, busy } = props
   const version = payload.ok ? payload.payload.contentVersion : 0
   const errorCode = payload.ok ? buttons.errorCode : payload.code
@@ -121,36 +123,42 @@ export function ExpertDraftBody(props: ExpertDraftBodyProps): JSX.Element {
   const reuseSkills = expert.skills.filter((skill) => skill.action === 'reuse')
 
   return (
+    /**
+     * ⚠️ 根**不能**复用 `.wb-draft-field`：那一类是"`label + value` 一对"的 flex 行。
+     * 本组件把多对字段直接排在根上，复用会让 5 对字段变成 5 个并排的 flex 项
+     * （2026-10-18 实测：正文被压成一字一行、横向溢出，整块不可读）。
+     * 两列网格定义在 `styles.ts` 的 `.wb-expert-draft`。
+     */
     <div
-      className="wb-draft-field"
+      className="wb-expert-draft"
       data-wb-expert-draft={draft.id}
       data-wb-expert-version={String(expert.contentVersion)}
       {...(errorCode === null ? {} : { 'data-wb-expert-error': errorCode })}
     >
-      <div className="wb-draft-field-k">新建专家</div>
+      <div className="wb-draft-field-k">{t('新建专家')}</div>
       <div className="wb-draft-field-v">
         <div className="wb-row-title">{front.name === '' ? expert.expertId : front.name}</div>
-        {front.description !== '' && <div className="wb-row-meta">{front.description}</div>}
-        <div className="wb-row-meta">
-          逻辑 ID：{expert.expertId} · 版本 v{expert.contentVersion} · {draft.id}
+        {front.description !== '' && <div className="wb-expert-note">{front.description}</div>}
+        <div className="wb-expert-note">
+          {t('逻辑 ID：{id} · 版本 v{version} · {draft}', { id: expert.expertId, version: expert.contentVersion, draft: draft.id })}
         </div>
       </div>
 
-      <div className="wb-draft-field-k">用户需求</div>
+      <div className="wb-draft-field-k">{t('用户需求')}</div>
       <div className="wb-draft-field-v">{expert.request === '' ? '（空）' : expert.request}</div>
 
-      <div className="wb-draft-field-k">生成方式</div>
+      <div className="wb-draft-field-k">{t('生成方式')}</div>
       <div className="wb-draft-field-v">
-        {creation}
+        {t(creation)}
         {expert.provenance !== null && expert.provenance.references.length > 0 && (
-          <div className="wb-row-meta">背景引用 {expert.provenance.references.length} 条（未复制原文）</div>
+          <div className="wb-expert-note">{t('背景引用 {n} 条（未复制原文）', { n: expert.provenance.references.length })}</div>
         )}
       </div>
 
-      <div className="wb-draft-field-k">来源</div>
+      <div className="wb-draft-field-k">{t('来源')}</div>
       <div className="wb-draft-field-v">
         {sources.length === 0
-          ? <div className="wb-row-meta">没有复制任何上游素材（原创）。</div>
+          ? <div className="wb-expert-note">{t('没有复制任何上游素材（原创）。')}</div>
           : (
             <ul className="wb-list">
               {sources.map((source) => <li key={source.id}>{sourceLine(source)}</li>)}
@@ -158,46 +166,46 @@ export function ExpertDraftBody(props: ExpertDraftBodyProps): JSX.Element {
           )}
         {unknownCommit > 0 && (
           <div className="wb-notes-warn">
-            有 {unknownCommit} 条来源拿不到具体提交，无法核对你拿到的是哪一版上游内容。
+            {t('有 {n} 条来源拿不到具体提交，无法核对你拿到的是哪一版上游内容。', { n: unknownCommit })}
           </div>
         )}
         {sources.length > 0 && (
-          <div className="wb-row-meta">
-            许可原文与版权声明会一起保存到人格附件里（不代替许可原文）。
+          <div className="wb-expert-note">
+            {t('许可原文与版权声明会一起保存到人格附件里（不代替许可原文）。')}
           </div>
         )}
       </div>
 
-      <div className="wb-draft-field-k">技能</div>
+      <div className="wb-draft-field-k">{t('技能')}</div>
       <div className="wb-draft-field-v">
         {expert.skills.length === 0
-          ? <div className="wb-row-meta">不需要任何 skill。</div>
+          ? <div className="wb-expert-note">{t('不需要任何 skill。')}</div>
           : (
             <ul className="wb-list">
               {[...requiredSkills, ...optionalSkills].map((skill) => (
                 <li key={skill.name} title={skill.reason}>
-                  {skillLine(skill)}
-                  {skill.packageFiles.length > 0 && <span className="wb-row-meta"> · {skill.packageFiles.length} 个文件</span>}
+                  {t('{required} · {name} · {action}', { required: t(skill.required ? '必需' : '可选（非必需）'), name: skill.name, action: t(SKILL_ACTION_LABELS[skill.action] ?? skill.action) })}
+                  {skill.packageFiles.length > 0 && <span className="wb-expert-note"> · {t('{n} 个文件', { n: skill.packageFiles.length })}</span>}
                 </li>
               ))}
             </ul>
           )}
-        <div className="wb-row-meta">
-          安装 {installSkills.length} 个 · 复用 {reuseSkills.length} 个
-          {expert.files.length > 0 && <> · 暂存附件 {expert.files.length} 个</>}
+        <div className="wb-expert-note">
+          {t('安装 {install} 个 · 复用 {reuse} 个', { install: installSkills.length, reuse: reuseSkills.length })}
+          {expert.files.length > 0 && <> · {t('暂存附件 {n} 个', { n: expert.files.length })}</>}
         </div>
       </div>
 
       {expert.validation !== null && (
-        <div className="wb-draft-field-k">校验</div>
+        <div className="wb-draft-field-k">{t('校验')}</div>
       )}
       {expert.validation !== null && (
         <div className="wb-draft-field-v">
-          <div className="wb-row-meta">
-            校验的是 v{expert.validation.version}（当前 v{expert.contentVersion}）· {expert.validation.checkedAt}
-            {expert.validation.version === expert.contentVersion ? '' : ' ⚠️ 草稿已改动，需要重新校验'}
+          <div className="wb-expert-note">
+            {t('校验的是 v{v}（当前 v{current}）· {time}', { v: expert.validation.version, current: expert.contentVersion, time: expert.validation.checkedAt })}
+            {expert.validation.version === expert.contentVersion ? '' : ` ⚠️ ${t('草稿已改动，需要重新校验')}`}
           </div>
-          {errors.length === 0 && <div className="wb-row-meta">没有错误。</div>}
+          {errors.length === 0 && <div className="wb-expert-note">{t('没有错误。')}</div>}
           {errors.length > 0 && (
             <ul className="wb-list">
               {errors.map((issue, index) => <li key={`e${index}`}>{issueLine(issue)}</li>)}
@@ -205,7 +213,7 @@ export function ExpertDraftBody(props: ExpertDraftBodyProps): JSX.Element {
           )}
           {warnings.length > 0 && (
             <div className="wb-notes-warn">
-              警告：{warnings.map((issue) => issueLine(issue)).join('；')}
+              {t('警告：{items}', { items: warnings.map((issue) => issueLine(issue)).join('；') })}
             </div>
           )}
         </div>
@@ -213,7 +221,7 @@ export function ExpertDraftBody(props: ExpertDraftBodyProps): JSX.Element {
 
       {failed && expert.lastInstallError !== null && (
         <div className="wb-notes wb-notes-warn">
-          <div className="wb-notes-body">上次安装失败：{issueLine(expert.lastInstallError)}</div>
+          <div className="wb-notes-body">{t('上次安装失败：{message}', { message: issueLine(expert.lastInstallError) })}</div>
         </div>
       )}
       {errorCode === null || errorMessage === null ? null : (
@@ -230,7 +238,7 @@ export function ExpertDraftBody(props: ExpertDraftBodyProps): JSX.Element {
           disabled={buttons.validate.enabled === false || busy}
           onClick={props.onValidate}
         >
-          {buttons.validate.label}
+          {t(buttons.validate.label)}
         </button>
         <button
           className="wb-btn"
@@ -238,14 +246,14 @@ export function ExpertDraftBody(props: ExpertDraftBodyProps): JSX.Element {
           disabled={buttons.confirm.enabled === false || busy}
           onClick={props.onConfirm}
         >
-          {buttons.confirm.label}
+          {t(buttons.confirm.label)}
         </button>
         <button
           className="wb-btn"
           disabled={buttons.editWithAi.enabled === false || busy}
           onClick={props.onOpenSession}
         >
-          {buttons.editWithAi.label}
+          {t(buttons.editWithAi.label)}
         </button>
       </div>
     </div>

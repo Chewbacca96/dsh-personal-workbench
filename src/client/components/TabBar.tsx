@@ -12,6 +12,7 @@
  * 规则本身抽成纯函数 `toggleTab`，可以被单测直接覆盖。
  */
 import type { Dict } from '../viewTypes.js'
+import { useI18n } from '../i18n.js'
 
 /** 「全部」伪分类的 code（与 `listPresentation.ALL_TAB` 同值，但这里不 import 它以免纯模块被 React 依赖）。 */
 export const ALL = 'all'
@@ -28,13 +29,13 @@ export interface TabItem {
  * 从字典生成 Tab 项：`全部` + 每个 dict 条目 + 可选的「其他」。
  * `counts` 由 `listPresentation` 的判定给出（不受当前 Tab 限制，所以能回答"切过去有几条"）。
  */
-export function buildTabs(dicts: readonly Dict[], counts: Readonly<Record<string, number>>, options: { allLabel?: string; includeOther?: boolean } = {}): TabItem[] {
+export function buildTabs(dicts: readonly Dict[], counts: Readonly<Record<string, number>>, options: { allLabel?: string; otherLabel?: string; includeOther?: boolean } = {}): TabItem[] {
   const tabs: TabItem[] = [{ code: ALL, name: options.allLabel ?? '全部', count: counts[ALL] ?? 0 }]
   for (const entry of dicts) {
     tabs.push({ code: entry.code, name: entry.name, color: String(entry.config.color ?? ''), count: counts[entry.code] ?? 0 })
   }
   if (options.includeOther !== false && (counts.other ?? 0) > 0) {
-    tabs.push({ code: 'other', name: '其他', count: counts.other ?? 0 })
+    tabs.push({ code: 'other', name: options.otherLabel ?? '其他', count: counts.other ?? 0 })
   }
   return tabs
 }
@@ -66,6 +67,7 @@ export function TabBar({ tabs, selected, onSelect, ariaLabel = '分类' }: {
   onSelect: (code: string, multi: boolean) => void
   ariaLabel?: string
 }): JSX.Element {
+  const { count } = useI18n()
   return (
     <div className="wb-tabs" role="tablist" aria-label={ariaLabel} data-tabbar>
       {tabs.map((tab) => (
@@ -81,7 +83,7 @@ export function TabBar({ tabs, selected, onSelect, ariaLabel = '分类' }: {
         >
           {tab.color !== undefined && tab.color !== '' && <i className="wb-tab-dot" style={{ background: tab.color }} />}
           {tab.name}
-          <span className="wb-tab-cnt">{tab.count.toLocaleString('zh-CN')}</span>
+          <span className="wb-tab-cnt">{count(tab.count)}</span>
         </button>
       ))}
     </div>

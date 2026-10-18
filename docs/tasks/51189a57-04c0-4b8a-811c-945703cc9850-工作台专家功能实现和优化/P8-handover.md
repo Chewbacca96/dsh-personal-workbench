@@ -236,14 +236,14 @@ const sent = { expectedVersion: payload.contentVersion, manifestHash: validation
 
 - **本批无功能缺陷、无修复轮**：主会话通读 14 个 diff + 抽查两个新组件关键段 + 逐条核对 38 个用例锚点，未发现需要改代码的问题；**主会话没有改动任何一行源码**（与 P7 的两处格式/注释小修不同）。
 - **一处观察，未改**：`src/client/index.tsx:711` 的 `if (sessionId === null) return ''` 在 `currentSessionIdOf(runtime): string` 下是恒假分支（`strict: true` 下 TS 也未报错；下一行 `?? ''` 已覆盖空串）。行为无害，按"只接线不改既有语义"未动它。
-- **核对过的引用**：`viewTypes.ts:203-216` 注释里引用的真实宿主出处（`@deepseek-ai/dsh-api-session-controller` 的 `ISessions.create`、`ClientSessions.create`）与主会话在 `C:\Users\Administrator\.dsh\profiles\node_modules\@deepseek-ai\` 下读到的 d.ts 一致；`sessions.create(...): Promise<SessionId>`、失败抛 `SessionCreateError`、`SessionSummary.blank` 都真实存在。
+- **核对过的引用**：`viewTypes.ts:203-216` 注释里引用的真实宿主出处（`@deepseek-ai/dsh-api-session-controller` 的 `ISessions.create`、`ClientSessions.create`）与主会话在 `C:\Users\<user>\.dsh\profiles\node_modules\@deepseek-ai\` 下读到的 d.ts 一致；`sessions.create(...): Promise<SessionId>`、失败抛 `SessionCreateError`、`SessionSummary.blank` 都真实存在。
 - **未接生产装配的部分**：本批只改客户端；服务端能力仍来自 P5/P6/P7。
 
 ---
 
 ## 11. 过程事实（给后续批次避坑）
 
-1. **委派失败与续跑**：P8 首次委派（子代理 `8dff0e26-ecf4-41ca-be3d-20502b9751b3`）在**只读阶段**被宿主判 failed，未写任何代码。现场核查：分支/HEAD 未变、4 个新文件都不存在、无半成品与备份残留 ⇒ 无需回滚；随后用 `send_message` 在**同一个子代理**上续跑（不新开），并补发真实宿主契约 + 可读包路径。教训：**给子代理的"真实 SDK 路径"必须自己先 `Test-Path` 验一遍**（我最初给的 `…\app.asar\dsh\` 在只读沙箱里读不到，`C:\Users\Administrator\.dsh\profiles\node_modules\@deepseek-ai\` 才是可读的）。
+1. **委派失败与续跑**：P8 首次委派（子代理 `8dff0e26-ecf4-41ca-be3d-20502b9751b3`）在**只读阶段**被宿主判 failed，未写任何代码。现场核查：分支/HEAD 未变、4 个新文件都不存在、无半成品与备份残留 ⇒ 无需回滚；随后用 `send_message` 在**同一个子代理**上续跑（不新开），并补发真实宿主契约 + 可读包路径。教训：**给子代理的"真实 SDK 路径"必须自己先 `Test-Path` 验一遍**（我最初给的 `…\app.asar\dsh\` 在只读沙箱里读不到，`C:\Users\<user>\.dsh\profiles\node_modules\@deepseek-ai\` 才是可读的）。
 2. **CRLF 陷阱**（已存团队记忆）：编辑工具若把文件整体写成 CRLF，`git diff --stat` 会整文件翻倍；改完要逐文件数 `\r\n` 并和 `git show HEAD:<file>` 对照。
 3. **测试 import 的是 `lib/**` 产物**：每次改源码都要**先 `pnpm build` 再跑测试**，否则断言跑的是旧产物（本批因此白排过一轮"工作区匹配"失败）；新模块不进 `tsconfig.build.json` 的 `include` 就没有 `lib/` 产物。
 4. **假 fetch 固件**：`generationHandlers()` 的值可能是普通对象而不是函数，包装时不能直接 `await base[path](rec)`。

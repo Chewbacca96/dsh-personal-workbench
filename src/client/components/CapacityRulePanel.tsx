@@ -16,6 +16,7 @@
  */
 import type { CapacityLedger, CapacityPlanRow, CapacityUnscheduledRow } from '../../shared/dailyPlanPolicy.js'
 import { Icon } from './Icon.js'
+import { useI18n } from '../i18n.js'
 
 /** 面板只吃 props；`capacity` 由页面从纯函数结果直接传进来，不做二次加工。 */
 export interface CapacityRulePanelProps {
@@ -72,9 +73,9 @@ export function capacityAriaLabel(capacity: CapacityLedger): string {
 const RULE_TEXTS = (defaultEstimateMinutes: number): Array<{ title: string; body: string }> => [
   { title: '「已排」只算当天计划', body: '已排 = 当天的「计划投入」分钟之和。没有排进当天计划的任务，即使今天到期也不计入 —— 它们出现在下面的「未排入」区，可以一键排入。' },
   { title: '计划投入是快照', body: '每条计划项的分钟数在排入那一刻就冻结：之后改任务的「预计耗时」不会回头改写它。要改就单独改这一条的计划投入。' },
-  { title: '历史投入不自动减', body: '任务完成/取消/归档、或者今日投入已结束时，那一天的投入**仍然算在已排里**（它是那天的计划记录）。只有你移除该日计划项或删除整份计划才会减少。' },
-  { title: '未排入只是候选', body: `下面的「未排入」是你今天可能做的事，每条显示**建议投入**（任务的预计耗时，没填就按默认 ${defaultEstimateMinutes} 分钟，可在设置里改）。建议投入**不计入**已排，避免把两件事混成一个数字。` },
-  { title: '逾期不改变已排', body: '「显示逾期待办候选」只决定逾期的未完成任务要不要出现在候选里，**不改变已排**，也不会把它们自动排进计划。' },
+  { title: '历史投入不自动减', body: '任务完成/取消/归档、或者今日投入已结束时，那一天的投入仍然算在已排里（它是那天的计划记录）。只有你移除该日计划项或删除整份计划才会减少。' },
+  { title: '未排入只是候选', body: `下面的「未排入」是你今天可能做的事，每条显示建议投入（任务的预计耗时，没填就按默认 ${defaultEstimateMinutes} 分钟，可在设置里改）。建议投入不计入已排，避免把两件事混成一个数字。` },
+  { title: '逾期不改变已排', body: '「显示逾期待办候选」只决定逾期的未完成任务要不要出现在候选里，不改变已排，也不会把它们自动排进计划。' },
   { title: '不含实际工时', body: '这里没有计时器：计划投入是你打算投多少，今日投入是否结束是你自己的判断，两者都不是实际工时，也不会自动累加任务进度。' },
   { title: '提醒与日历不受影响', body: '提醒、逾期判定与日历上的到期展示仍按「截止时间」走，本次改造只动了「今天要投入多少」这件事。' },
 ]
@@ -160,6 +161,7 @@ function UnreadableNotice({ reason }: { reason: string }): JSX.Element {
 }
 
 export function CapacityRulePanel(props: CapacityRulePanelProps): JSX.Element {
+  const { t } = useI18n()
   const { capacity, dailyCapacityMinutes, defaultEstimateMinutes, includeOverdue, onIncludeOverdueChange, expanded, onExpandedChange, onAddToPlan, addingTaskId, inlineToggle = false } = props
   return (
     <div className="wb-cap-rule" data-cap-expanded={expanded ? '1' : '0'} data-inline={inlineToggle ? '1' : '0'}>
@@ -183,7 +185,7 @@ export function CapacityRulePanel(props: CapacityRulePanelProps): JSX.Element {
           <span className="wb-cap-rule-arrow" aria-hidden="true">
             <Icon name="chevron" size={12} />
           </span>
-          规则
+          {t('规则')}
         </button>
         {/**
           * 摘要只在**非内联**模式下渲染。

@@ -1540,7 +1540,7 @@ function installPlanned(
       return failure(
         code,
         field,
-        `${message}；草稿已确认（DB 已提交），按 §6.5 **不回滚**：再确认一次即可补齐 publication.json 与 provider 挂载`,
+        `${message}；草稿已确认（DB 已提交），按 §6.5 不回滚：再确认一次即可补齐 publication.json 与 provider 挂载`,
         errors,
         payload.contentVersion,
       )

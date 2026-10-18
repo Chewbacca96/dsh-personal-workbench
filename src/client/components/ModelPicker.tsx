@@ -16,6 +16,8 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
+import { overlayMountContainer } from '../overlayMount.js'
+import { useI18n } from '../i18n.js'
 import type { ModelDirectoryRuntime, ModelProviderGroup, WorkbenchRuntime } from '../viewTypes.js'
 import type { ModelModalityRecord } from '../modelCapability.js'
 import type { QuickImageDraft } from '../quickAttachments.js'
@@ -114,6 +116,7 @@ export function ModelPicker({ runtime, value, onChange, modalityTable, disabled,
   onError: (message: string) => void
   onLoaded: () => void
 }): JSX.Element {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   /**
@@ -442,12 +445,12 @@ export function ModelPicker({ runtime, value, onChange, modalityTable, disabled,
         onKeyDown={onTriggerKeyDown}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title="选择本次 AI 会话使用的模型（快速录入与共享提示词弹窗共用同一份选择）"
+        title={t('选择本次 AI 会话使用的模型（快速录入与共享提示词弹窗共用同一份选择）')}
       >
-        <Icon name="model" />{selectedLabel}<span style={{ flex: 'none' }}>{open ? '▲' : '▼'}</span>
+        <Icon name="model" />{value === null ? t(selectedLabel) : selectedLabel}<span style={{ flex: 'none' }}>{open ? '▲' : '▼'}</span>
       </button>
       {/*
-        浮层 **portal 到 document.body**（不是就地渲染）：
+        浮层 **portal 到宿主 overlay 层（拿不到时退回 body）**（不是就地渲染）：
         `.wb-dialog` 有 `overflow: hidden`、`.wb-dialog-body` 有 `overflow: auto`、
         `.wb-overlay` 有 `backdrop-filter`（会变成 fixed 后代的包含块）——
         留在原地就一定被裁。它与触发按钮的祖先关系因此断开了，
@@ -460,7 +463,7 @@ export function ModelPicker({ runtime, value, onChange, modalityTable, disabled,
             ref={menuRef}
             className="wb-model-menu"
             role="listbox"
-            aria-label="选择模型"
+            aria-label={t('选择模型')}
             style={{
               left: placement === null ? 0 : placement.left,
               top: placement === null ? 0 : placement.top,
@@ -478,7 +481,7 @@ export function ModelPicker({ runtime, value, onChange, modalityTable, disabled,
               className={`wb-model-option${value === null ? ' selected' : ''}`}
               onClick={() => { onChange(clearQuickModelSelection(value)); closePicker() }}
             >
-              <span className="wb-model-option-main">{CLEAR_SELECTION_LABEL}</span>
+              <span className="wb-model-option-main">{t(CLEAR_SELECTION_LABEL)}</span>
               {value === null && <Icon name="check" size={14} />}
             </button>
             {/*
@@ -489,7 +492,7 @@ export function ModelPicker({ runtime, value, onChange, modalityTable, disabled,
             {menuDecision.mode === 'clear-only' && (
               <div className="wb-model-menu-error">{menuDecision.reason}</div>
             )}
-            {menuDecision.mode === 'full' && (loading || state.status === 'loading') && <div className="wb-model-menu-empty">正在读取模型列表…</div>}
+            {menuDecision.mode === 'full' && (loading || state.status === 'loading') && <div className="wb-model-menu-empty">{t('正在读取模型列表…')}</div>}
             {menuDecision.mode === 'full' && state.error !== null && <div className="wb-model-menu-error">{state.error}</div>}
             {menuDecision.mode === 'full' && state.groups.map((group) => (
               <div key={group.id}>
@@ -505,7 +508,7 @@ export function ModelPicker({ runtime, value, onChange, modalityTable, disabled,
                         {(effort !== undefined || supportsImage === false) && (
                           <span className={`wb-model-option-note${supportsImage === false ? ' warn' : ''}`}>
                             {effort === undefined ? '' : effort.name}
-                            {supportsImage === false ? `${effort === undefined ? '' : ' · '}不支持图片输入` : ''}
+                            {supportsImage === false ? `${effort === undefined ? '' : ' · '}${t('不支持图片输入')}` : ''}
                           </span>
                         )}
                       </span>
@@ -516,14 +519,14 @@ export function ModelPicker({ runtime, value, onChange, modalityTable, disabled,
               </div>
             ))}
             {menuDecision.mode === 'full' && state.groups.length === 0 && !loading && state.status !== 'loading' && state.error === null && (
-              <div className="wb-model-menu-empty">暂无可用模型</div>
+              <div className="wb-model-menu-empty">{t('暂无可用模型')}</div>
             )}
             {menuDecision.mode === 'full' && state.failures.length > 0 && (
-              <div className="wb-model-menu-empty">{state.failures.length} 个模型来源读取失败（其余仍可选）</div>
+              <div className="wb-model-menu-empty">{t('{n} 个模型来源读取失败（其余仍可选）', { n: state.failures.length })}</div>
             )}
           </div>
         </>,
-        document.body,
+        overlayMountContainer(),
       )}
     </div>
   )

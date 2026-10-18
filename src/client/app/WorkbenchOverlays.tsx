@@ -193,8 +193,8 @@ export function WorkbenchOverlays(props: WorkbenchAssembly): JSX.Element {
             </div>
             <div style={{ fontSize: 12.5, color: 'var(--dsw-alias-label-secondary)' }}>
               {duplicatePrompt.sameDescription
-                ? '两条的**描述逐字相同** —— 很可能是同一件事被提交了两次（例如执行会话又交了一份草稿）。'
-                : '两条的描述**不同** —— 可能是两次独立录入，也可能是执行会话重复提交，请自行判断。'}
+                ? <>两条的<b>描述逐字相同</b> —— 很可能是同一件事被提交了两次（例如执行会话又交了一份草稿）。</>
+                : <>两条的描述<b>不同</b> —— 可能是两次独立录入，也可能是执行会话重复提交，请自行判断。</>}
               {duplicatePrompt.sameWorkspace ? ' 工作区相同。' : ' 工作区不同。'}
             </div>
             <div style={{ marginTop: 8, fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>

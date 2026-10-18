@@ -254,7 +254,7 @@ export function listPersonaResources(resourceRoot: string): PersonaResourceList 
       }
       if (entry.isFile() === false) continue
       if (resources.length >= PERSONA_MAX_RESOURCES) {
-        diagnostics.push({ code: 'resource-limit', path: dir, message: `资源数达到上限 ${PERSONA_MAX_RESOURCES}，**没有列全**：${resourceRoot}` })
+        diagnostics.push({ code: 'resource-limit', path: dir, message: `资源数达到上限 ${PERSONA_MAX_RESOURCES}，没有列全：${resourceRoot}` })
         return
       }
       let bytes = 0

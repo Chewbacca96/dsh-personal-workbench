@@ -33,6 +33,7 @@ import {
   type PersonaSelection,
 } from '../personaPicker.js'
 import { Icon } from './Icon.js'
+import { useI18n } from '../i18n.js'
 
 export interface PersonaPickerProps {
   value: PersonaSelection
@@ -52,6 +53,7 @@ export interface PersonaPickerProps {
 }
 
 export function PersonaPicker({ value, onChange, disabled = false, personas, loading = false, problem = '', onRetry }: PersonaPickerProps): React.ReactNode {
+  const { t, count } = useI18n()
   const [query, setQuery] = useState('')
   const [favoritesOnly, setFavoritesOnly] = useState(false)
 
@@ -73,15 +75,15 @@ export function PersonaPicker({ value, onChange, disabled = false, personas, loa
   return (
     <div className="wb-persona-picker">
       <div className="wb-persona-head">
-        <span><Icon name="ai" size={13} /> 角色（专家人格）</span>
-        <span className="wb-persona-current">{personaSelectionLabel(value, personas)}</span>
+        <span><Icon name="ai" size={13} />{t('角色（专家人格）')}</span>
+        <span className="wb-persona-current">{t(personaSelectionLabel(value, personas))}</span>
       </div>
 
       {problem !== '' && (
         <div className="wb-skill-problem" role="status">
-          <span><Icon name="ai" size={13} /> 角色库暂不可用 —— {problem}</span>
+          <span><Icon name="ai" size={13} /> {t('角色库暂不可用 —— {message}', { message: problem })}</span>
           {onRetry !== undefined && (
-            <button type="button" className="wb-btn" onClick={onRetry}><Icon name="refresh" size={12} />重试</button>
+            <button type="button" className="wb-btn" onClick={onRetry}><Icon name="refresh" size={12} />{t('重试')}</button>
           )}
         </div>
       )}
@@ -92,7 +94,7 @@ export function PersonaPicker({ value, onChange, disabled = false, personas, loa
           className="wb-skill-search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder={`搜索角色名 / 简介 / 分组 / 工作模式（共 ${personas.length} 个）`}
+          placeholder={t('搜索角色名 / 简介 / 分组 / 工作模式（共 {n} 个）', { n: personas.length })}
         />
         <button
           type="button"
@@ -102,7 +104,7 @@ export function PersonaPicker({ value, onChange, disabled = false, personas, loa
             ? '还没有收藏角色 —— 可以在「设置 → 角色库」里收藏'
             : '只看已收藏的角色'}
         >
-          {favoritesOnly ? '★ 只看收藏' : '☆ 只看收藏'}
+          {favoritesOnly ? t('★ 只看收藏') : t('☆ 只看收藏')}
         </button>
       </div>
 
@@ -113,8 +115,8 @@ export function PersonaPicker({ value, onChange, disabled = false, personas, loa
           disabled={disabled}
           onClick={() => onChange(INHERIT_PERSONA)}
         >
-          <span className="wb-persona-name">未指定（沿用该会话原有角色）</span>
-          <span className="wb-persona-desc">复用型会话继续用原来的角色；新会话等于无角色</span>
+          <span className="wb-persona-name">{t('未指定（沿用该会话原有角色）')}</span>
+          <span className="wb-persona-desc">{t('复用型会话继续用原来的角色；新会话等于无角色')}</span>
         </button>
         <button
           type="button"
@@ -122,27 +124,27 @@ export function PersonaPicker({ value, onChange, disabled = false, personas, loa
           disabled={disabled}
           onClick={() => onChange(NO_PERSONA)}
         >
-          <span className="wb-persona-name">无角色</span>
-          <span className="wb-persona-desc">明确不带人格（与"复用会话原有角色"不同：那会新建会话）</span>
+          <span className="wb-persona-name">{t('无角色')}</span>
+          <span className="wb-persona-desc">{t('明确不带人格（与"复用会话原有角色"不同：那会新建会话）')}</span>
         </button>
 
-        {loading && <div className="wb-skill-hint">读取角色库…</div>}
+        {loading && <div className="wb-skill-hint">{t('读取角色库…')}</div>}
         {!loading && groups.length === 0 && (
           <div className="wb-skill-hint">
             {personas.length === 0
-              ? '角色库为空（内置库没打包进来？）。不影响本会话继续使用。'
+              ? t('角色库为空（内置库没打包进来？）。不影响本会话继续使用。')
               : favoritesOnly && favoriteCount === 0
-                ? '还没有收藏角色 —— 在「设置 → 角色库（专家人格）」里点☆收藏，收藏后这里就能筛出来。'
-                : '没有匹配的角色'}
+                ? t('还没有收藏角色 —— 在「设置 → 角色库（专家人格）」里点☆收藏，收藏后这里就能筛出来。')
+                : t('没有匹配的角色')}
           </div>
         )}
         {!loading && selectedMissing && (
-          <div className="wb-skill-hint">当前选中的角色不在筛选结果里（改一下搜索或关掉「只看收藏」就能看到它）。</div>
+          <div className="wb-skill-hint">{t('当前选中的角色不在筛选结果里（改一下搜索或关掉「只看收藏」就能看到它）。')}</div>
         )}
         {!loading && groups.map((group) => (
           <div className="wb-persona-group" key={group.group}>
             <div className="wb-persona-group-name">
-              {group.label}
+              {t(group.label)}
               <span className="wb-persona-group-count">{group.items.length} 个</span>
             </div>
             {group.items.map((persona) => (
@@ -156,9 +158,9 @@ export function PersonaPicker({ value, onChange, disabled = false, personas, loa
                   ? `${persona.id}｜${personaSourceLabel(persona.source)}${persona.favorite ? '｜已收藏' : ''}`
                   : `${persona.id}（已停用，需先在设置里启用）`}
               >
-                <span className="wb-persona-name">{persona.emoji === '' ? '' : `${persona.emoji} `}{persona.name}{persona.favorite ? ' ★' : ''}{persona.enabled ? '' : '（已停用）'}</span>
-                <span className="wb-persona-desc">{persona.description === '' ? '（无简介）' : persona.description}</span>
-                <span className="wb-persona-source">{personaSourceLabel(persona.source)}{persona.mode === '' ? '' : `｜${persona.mode}`}</span>
+                <span className="wb-persona-name">{persona.emoji === '' ? '' : `${persona.emoji} `}{persona.name}{persona.favorite ? ' ★' : ''}{persona.enabled ? '' : t('（已停用）')}</span>
+                <span className="wb-persona-desc">{persona.description === '' ? t('（无简介）') : persona.description}</span>
+                <span className="wb-persona-source">{t(personaSourceLabel(persona.source))}{persona.mode === '' ? '' : `｜${persona.mode}`}</span>
               </button>
             ))}
           </div>
@@ -166,9 +168,9 @@ export function PersonaPicker({ value, onChange, disabled = false, personas, loa
       </div>
 
       <div className="wb-persona-foot">
-        共 {personas.length} 个可用角色（当前显示 {visible.length} 个；启用 {enabledCount}{disabledCount > 0 ? ` / 停用 ${disabledCount}` : ''}）
-        · 依赖技能缺失的角色不出现在这里（在「设置 → 角色库」里能看到原因）
-        · 收藏与停用在设置里改 · 角色正文由 AI 按需加载，不写进提示词
+        {t('共 {n} 个可用角色（当前显示 {shown} 个；启用 {enabled}{disabledPart}）', { n: personas.length, shown: visible.length, enabled: enabledCount, disabledPart: disabledCount > 0 ? ` / ${t('停用')} ${disabledCount}` : '' })}
+        · {t('依赖技能缺失的角色不出现在这里（在「设置 → 角色库」里能看到原因）')}
+        · {t('收藏与停用在设置里改 · 角色正文由 AI 按需加载，不写进提示词')}
       </div>
     </div>
   )

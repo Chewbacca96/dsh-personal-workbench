@@ -55,6 +55,7 @@ import { installExpertInputSource } from './expertInputSource.js'
 import { decideSidebarWidth, decideTopInset, pickFrameCandidate } from './panelGeometry.js'
 import { indexModalities, type ModelModalityRecord
 } from './modelCapability.js'
+import { I18nProvider, localeFromSettings } from './i18n.js'
 
 const CSS = WORKBENCH_CSS
 
@@ -774,14 +775,25 @@ function WorkbenchApp({ runtime, closePanel }: { runtime: WorkbenchRuntime; clos
     applyWorkspaceDir,
   }
 
+  /**
+   * 界面语言（issue #12）：`settings.uiLocale` 由设置域拥有，这里只解析成实际语言并下发。
+   * 读取 `navigator.language` 时判 `typeof navigator`：本文件也会在 node 里被单测 import。
+   */
+  const uiLocale = localeFromSettings(
+    settings.uiLocale,
+    typeof navigator === 'undefined' ? '' : navigator.language,
+  )
+
   return (
-    <div className="wb-app">
-      <WorkbenchHeader {...assembly} />
-      <WorkbenchOverlays {...assembly} />
-      <WorkbenchBody {...assembly} />
-      <WorkbenchDialogs {...assembly} />
-      <ToastHost items={toasts} onDismiss={dismissToast} />
-    </div>
+    <I18nProvider locale={uiLocale}>
+      <div className="wb-app">
+        <WorkbenchHeader {...assembly} />
+        <WorkbenchOverlays {...assembly} />
+        <WorkbenchBody {...assembly} />
+        <WorkbenchDialogs {...assembly} />
+        <ToastHost items={toasts} onDismiss={dismissToast} />
+      </div>
+    </I18nProvider>
   )
 }
 

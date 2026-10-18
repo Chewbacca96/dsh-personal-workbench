@@ -277,7 +277,7 @@ test('回归 v1.15.2：模型浮层必须 portal 到 body、位置由 placePopov
   const picker = /export function ModelPicker\([\s\S]*?\r?\n\}\r?\n/.exec(source)
   assert.ok(picker !== null, '没找到 ModelPicker 实现（改名/挪文件了就要同步这条断言）')
   assert.match(picker[0], /createPortal\(/, '菜单必须走 createPortal')
-  assert.match(picker[0], /,\s*document\.body,\s*\)/, 'portal 的目标必须是 document.body（留在弹窗里就还会被 overflow 裁）')
+  assert.match(picker[0], /,\s*overlayMountContainer\(\),\s*\)/, 'portal 的目标走 overlayMountContainer（留在弹窗里会被 overflow 裁；issue #14 起优先宿主 overlay 层）')
   // 滚动/改尺寸要重算：`scroll` 不冒泡，必须捕获阶段才收得到弹窗内部的滚动
   assert.match(picker[0], /window\.addEventListener\('scroll', update, true\)/, '弹窗内滚动时必须重算（捕获阶段）')
   assert.match(picker[0], /window\.addEventListener\('resize', update\)/)

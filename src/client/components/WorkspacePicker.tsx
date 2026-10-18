@@ -17,6 +17,7 @@ import {
   candidatePlaceholder, selectedCandidatePath, workspaceCandidateLabel,
   type WorkspaceCandidate,
 } from '../workspacePicker.js'
+import { useI18n } from '../i18n.js'
 
 export interface WorkspacePickerProps {
   /** 当前值（路径；空串 = 不指定，走既有继承逻辑）。 */
@@ -42,13 +43,14 @@ export function WorkspacePicker({
   value, touched, sourceLabel, candidates, disabled = false, browseProblem = null,
   placeholder = '', onChange, onBrowse, onForget, showForget = false,
 }: WorkspacePickerProps): ReactNode {
+  const { t } = useI18n()
   const selected = selectedCandidatePath(value, candidates)
   const browseDisabled = disabled || browseProblem !== null
   return (
     <div className="wb-field" data-workspace-picker>
       <span>
-        AI 会话工作区
-        <span className="wb-field-note">{touched ? '手动指定' : sourceLabel}</span>
+        {t('AI 会话工作区')}
+        <span className="wb-field-note">{touched ? t('手动指定') : t(sourceLabel)}</span>
       </span>
       <div className="wb-field-row">
         <select
@@ -56,12 +58,12 @@ export function WorkspacePicker({
           value={selected}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
-          title="从已打开的工作区 / 最近手动选择 / 默认工作区里选一个；也可以直接在右边输入任意路径"
+          title={t('从已打开的工作区 / 最近手动选择 / 默认工作区里选一个；也可以直接在右边输入任意路径')}
         >
-          <option value="">{candidatePlaceholder(candidates)}</option>
+          <option value="">{t(candidatePlaceholder(candidates))}</option>
           {candidates.map((candidate) => (
             <option key={candidate.path} value={candidate.path}>
-              {workspaceCandidateLabel(candidate.source)} · {candidate.path}
+              {t(workspaceCandidateLabel(candidate.source))} · {candidate.path}
             </option>
           ))}
         </select>
@@ -77,10 +79,10 @@ export function WorkspacePicker({
           className="wb-btn"
           data-workspace-browse
           disabled={browseDisabled}
-          title={browseProblem ?? '打开文件夹浏览器，选一个本地目录'}
+          title={browseProblem ?? t('打开文件夹浏览器，选一个本地目录')}
           onClick={onBrowse}
         >
-          浏览…
+          {t('浏览…')}
         </button>
         {showForget && onForget !== undefined && (
           <button
@@ -88,10 +90,10 @@ export function WorkspacePicker({
             className="wb-btn"
             data-workspace-forget
             disabled={disabled || String(value ?? '').trim() === ''}
-            title={`不再把 ${value} 当作默认工作区（下次打开改用设置里的默认值）`}
+            title={t('不再把 {path} 当作默认工作区（下次打开改用设置里的默认值）', { path: value })}
             onClick={onForget}
           >
-            不再记住
+            {t('不再记住')}
           </button>
         )}
       </div>

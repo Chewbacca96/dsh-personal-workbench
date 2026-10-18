@@ -121,7 +121,7 @@ detail 里写明 dispatchPath / expected / manualResendBySuite / dispatchWaitMs 
   `model-e60-dispatch.json`、`model-e60-draft-row.json`、`model-e60-first-user-message.json`、
   `model-e60-session.json`、9 张真机截图 `01-面板.png` … `99-收尾.png`）。
 - **目标实例**：`http://127.0.0.1:3080`，health = `version 1.16.5 / buildId wb-8181274a3900fe0b / schema 19`。
-- **装盘副本**：`C:\Users\Administrator\.dsh\profiles\web\node_modules\@dely0\dsh-personal-workbench`
+- **装盘副本**：`C:\Users\<user>\.dsh\profiles\web\node_modules\@dely0\dsh-personal-workbench`
   （`lib/client.js` 597 782 字节，2026/10/6 0:10:50）；来源 `_local-build/current.txt` →
   `dsh-personal-workbench-dev-7dc60f9-20261006-001045.tgz`（2 649 920 字节 / **311 条目**）。
   **修复在包里的直接证据**：该 `lib/client.js` 里 generation-start 处是压缩后的
@@ -134,16 +134,16 @@ detail 里写明 dispatchPath / expected / manualResendBySuite / dispatchWaitMs 
   正文就是**插件自己构造的 prompt**（`你在本工作台里负责**新建一位专家角色**…` + `## 方法论（全文）` + `## 用户的请求` +
   `## 交付方式`）⇒ 产品通道真的把提示词发出去了。
 - **生成会话**：`session-095ffd03-88f3-4495-b7e6-3446767f47c9`
-  （目录 `C:\Users\Administrator\.dsh\sessions\--D-Code-Linksight-dsh-workbench--\session-095ffd03-…`，
-  `cwd = D:\Code\Linksight\dsh-workbench`、`parentSession` 空、`delegationDepth = 0`、49 事件 / 0 解压失败 / 4 条 `user/message`），
+  （目录 `C:\Users\<user>\.dsh\sessions\--D-Code-<company>-dsh-workbench--\session-095ffd03-…`，
+  `cwd = D:\Code\<company>\dsh-workbench`、`parentSession` 空、`delegationDepth = 0`、49 事件 / 0 解压失败 / 4 条 `user/message`），
   模型 `deepseek-official/deepseek-flash`（maxTokens 256000 / reasoningEffort high），
   工具调用序列：`workbench_get_expert_draft` → `workbench_search_knowledge` → `workbench_submit_expert_draft`×3 → `workbench_validate_expert_draft`。
 - **目标库草稿行**：`17121124-fb7d-44a3-a461-6bf7d9ee7dc1`（`session_id` = 上面那个会话、`status_code=pending`、
   `content_version=1`、`phase="validated"`、`expert_id=generated/7d4b7460-46e1-4a99-9820-d4b1c30356ad`、
   `persona_chars=653`、`provenance_kind="original"`、validation `manifestHash 6b1bae6f67bb1c20e84438518419e197f61921dd0c676c4d2742b590c91c37e5` / `errors[]` / `warnings[]`）。
-- **确认前正式库为空**：`userLibrary = {present:false, rootExists:false, root:"C:\Users\Administrator\.dsh\workbench\personas"}`。
+- **确认前正式库为空**：`userLibrary = {present:false, rootExists:false, root:"C:\Users\<user>\.dsh\workbench\personas"}`。
 - **UI 路径**：套件用**真实点击**走完弹窗（`settingsClick {x=1182,y=26,text=设置,clickChannel=dom-click}` →
-  `adminPresent:true` → `createClick:ok` → `typed:true` → 工作区 `{ok:true,value:ef1cf070-c039-4062-b74a-dcb5fd1174b8,label:D:\Code\Linksight\dsh-workbench}` →
+  `adminPresent:true` → `createClick:ok` → `typed:true` → 工作区 `{ok:true,value:ef1cf070-c039-4062-b74a-dcb5fd1174b8,label:D:\Code\<company>\dsh-workbench}` →
   `submitState {disabled:false,text:开始生成}` → `clicked {ok:true}`）。
 - **包内容检查（AX-E59 全绿）**：311 条目、版本 1.16.5、方法论 `assets/expert-generation/methodology.md` 在、
   `lib/experts/**` 24 个、`lib/**` 280 个、原有 personas 15 篇、三份许可原文齐；

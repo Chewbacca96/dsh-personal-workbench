@@ -567,7 +567,7 @@ dry-run 通过、目标不等于当前实例且任务已有测试实例授权后
 
 - **反向注入 6 处**（5 处子代理 + 1 处主会话自选，全部真红、还原后 SHA256 逐字节一致）：① 删 busy 守卫 → 37/1（AX-E52）；② `manifestHash` 换常量 → 37/1（AX-E54）；③ `create` 改复用 blank 会话 → 32/6（AX-E52 + 5 条 AX-E53）；④ auto 保存失败不回滚 → 37/1（AX-E57）；⑤ 版本冲突后自动确认新版本 → 37/1（AX-E55）；⑥ **主会话自选**：`src/client/hooks/useWorkbenchExperts.ts:579` 的 picker 第二道闸门改成 `return true` → `pnpm build` 0 但 `tests 38 / pass 37 / fail 1`（AX-E56「required 缺失的行：选择器不可选」），还原后 `build 0` + `38/38`，sha256 回到 `DEF610758C5882D2556F2744FB07AF5C6383609EDFBA8B9D2F757BABD044F6DD`。
 - **diff 通读 + 逐条核对 38 个用例锚点**：14 个已跟踪文件 diff 全读，`test/expertClientFlow.test.mjs` 的 38 个行号逐条打开核对（每一行确实是所述行为的用例开头）。**未发现功能缺陷；本批没有修复轮，主会话未改动任何一行源码**。
-- **真实宿主契约核对**：在 `C:\Users\Administrator\.dsh\profiles\node_modules\@deepseek-ai\` 下读到 `ISessions.create(opts?: { workspaceId?; cwd?; sessionId? }): Promise<SessionId>`、失败抛 `SessionCreateError`、`SessionSummary.blank`、`uiWorkspace.openSession(target)` 均真实存在，与 `viewTypes.ts` 注释所述一致。
+- **真实宿主契约核对**：在 `C:\Users\<user>\.dsh\profiles\node_modules\@deepseek-ai\` 下读到 `ISessions.create(opts?: { workspaceId?; cwd?; sessionId? }): Promise<SessionId>`、失败抛 `SessionCreateError`、`SessionSummary.blank`、`uiWorkspace.openSession(target)` 均真实存在，与 `viewTypes.ts` 注释所述一致。
 
 ### 15.5 规格偏差、复核与修复
 
@@ -747,7 +747,7 @@ dry-run 通过、目标不等于当前实例且任务已有测试实例授权后
 |---|---|---|---|
 | 1 | `node --check scripts/verify/suites/expert.mjs` | **0** | 语法通过 |
 | 2 | `node scripts/check-verify-scripts.mjs` | **0** | 现役 11 / 待迁移 0 / 作废 3；`expert` 在册 |
-| 3 | `node scripts/verify/suites/expert.mjs --url http://127.0.0.1:3080 --db-path 'C:\Users\Administrator\.dsh\workbench\verify-web.db' --target-profile-dir 'C:\Users\Administrator\.dsh\profiles\web' --evidence-dir "$env:TEMP\p10-suite-evidence"` | **1** | 第一次：30/35（failed 1 / skipped 4）。fail = `AX-E61-a`（**套件自身的形状读错**：只认 `body.entries`，而该端点真实形状是 `{ok,experts,personas,…}` ⇒ 15 位可引用专家被读成 0）。E60 的 skip 原因是**套件自身的门槛写错**：要求 `events > 4`，而宿主建出的会话只有 4 条握手事件 ⇒ 把产品缺陷误报成"没建会话"。两处都已修（§17.3），**不是环境问题** |
+| 3 | `node scripts/verify/suites/expert.mjs --url http://127.0.0.1:3080 --db-path 'C:\Users\<user>\.dsh\workbench\verify-web.db' --target-profile-dir 'C:\Users\<user>\.dsh\profiles\web' --evidence-dir "$env:TEMP\p10-suite-evidence"` | **1** | 第一次：30/35（failed 1 / skipped 4）。fail = `AX-E61-a`（**套件自身的形状读错**：只认 `body.entries`，而该端点真实形状是 `{ok,experts,personas,…}` ⇒ 15 位可引用专家被读成 0）。E60 的 skip 原因是**套件自身的门槛写错**：要求 `events > 4`，而宿主建出的会话只有 4 条握手事件 ⇒ 把产品缺陷误报成"没建会话"。两处都已修（§17.3），**不是环境问题** |
 | 4 | 同上（`--evidence-dir "$env:TEMP\p10-suite-evidence4"`）…run 12 | **0** | 修完套件自身缺陷后：`31/35`（failed 0 / skipped 4）。E60 仍 skip：SPA 的 `dsh.sessions.current` 在 300s 整页重载里始终停在旧会话，消息**根本没发进被追踪的那个会话**（`toolCalls:[]` 是误判） |
 | 5 | 同上（run 13） | **0** | 套件崩在 `afterReloadLoop` 变量名残留（`Cannot read properties of undefined (reading 'current')`）⇒ `28/28` 后中断。已修变量名 + 给换会话段加 try/catch 兜底（一条探针不再能打断整套件），并改成「关浏览器 + 冷启动新实例」 |
 | 5b | 同上（**run 14，最终一次**，`--evidence-dir "$env:TEMP\p10-suite-evidence14"`） | **0** | **`{"passed":33,"failed":0,"skipped":2,"total":35}`** —— **AX-E60 与 AX-E60-b 转绿**（真实会话 + 真实工具调用 + 草稿 `contentVersion=1`/`phase=validated` + 确认前正式角色库为空），skip 只剩 `AX-E61` / `AX-E62` |

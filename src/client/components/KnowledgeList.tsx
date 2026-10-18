@@ -19,6 +19,7 @@ import { TagFilter } from './TagFilter.js'
 import { Icon } from './Icon.js'
 import { fmtTime } from '../format.js'
 import type { Dict } from '../viewTypes.js'
+import { translate } from '../../shared/i18n.js'
 
 export interface KnowledgeFilters {
   keyword: string
@@ -79,11 +80,11 @@ export function knowledgeFilterActive(f: KnowledgeFilters): boolean {
  * Tab 徽标：`全部` + 每个知识类型 + 「其他」（库里出现了字典外的 kindCode 时不静默丢件）。
  * 拼装逻辑在 `TabBar.buildTabs` —— 与任务页共用一份，不各写一遍。
  */
-export function kindTabs(kinds: readonly Dict[], counts: Readonly<Record<string, number>>): TabItem[] {
-  return buildTabs(kinds, counts)
+export function kindTabs(kinds: readonly Dict[], counts: Readonly<Record<string, number>>, labels: { all?: string; other?: string } = {}): TabItem[] {
+  return buildTabs(kinds, counts, { allLabel: labels.all, otherLabel: labels.other })
 }
 
-export function KnowledgeToolbar({ filters, tabs, tagCounts, total, onChange, onClear, onCreate, onSummarizeDoc, busy = false }: {
+export function KnowledgeToolbar({ filters, tabs, tagCounts, total, onChange, onClear, onCreate, onSummarizeDoc, busy = false, t }: {
   filters: KnowledgeFilters
   tabs: readonly TabItem[]
   tagCounts: readonly TagCount[]
@@ -93,8 +94,11 @@ export function KnowledgeToolbar({ filters, tabs, tagCounts, total, onChange, on
   onCreate: () => void
   onSummarizeDoc: () => void
   busy?: boolean
+  /** 可选翻译器；直接调用本组件的测试不传，退回中文原文。 */
+  t?: (key: string, params?: Record<string, string | number>) => string
 }): JSX.Element {
-  const sortName = SORT_OPTIONS.find((o) => o.key === filters.sortKey)?.name ?? '更新时间'
+  const tr = t ?? ((key: string, params?: Record<string, string | number>): string => translate('zh-CN', key, params))
+  const sortName = tr(SORT_OPTIONS.find((o) => o.key === filters.sortKey)?.name ?? '更新时间')
   return (
     <>
       {/* 一行：搜索 + 排序 + 命中数左对齐；新建 / AI 总结 / 清空筛选右对齐。
@@ -107,35 +111,35 @@ export function KnowledgeToolbar({ filters, tabs, tagCounts, total, onChange, on
           className="wb-kb-search"
           type="search"
           data-kb-search
-          placeholder="搜索标题 / 正文 / 标签"
+          placeholder={tr('搜索标题 / 正文 / 标签')}
           value={filters.keyword}
           onChange={(e) => onChange({ keyword: e.target.value, page: 0 })}
         />
         <select
           className="wb-kb-sortkey"
           value={filters.sortKey}
-          title="排序键（默认更新时间）"
+          title={tr('排序键（默认更新时间）')}
           onChange={(e) => onChange({ sortKey: e.target.value as SortKey, page: 0 })}
         >
-          {SORT_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.name}</option>)}
+          {SORT_OPTIONS.map((o) => <option key={o.key} value={o.key}>{tr(o.name)}</option>)}
         </select>
         <button
           type="button"
           className="wb-btn wb-kb-sortdir"
           data-kb-sortdir
-          title={`当前按「${sortName}」${filters.sortDir === 'desc' ? '降序' : '升序'}，点击切换`}
-          aria-label={`切换排序方向（当前按${sortName}${filters.sortDir === 'desc' ? '降序' : '升序'}）`}
+          title={tr('当前按「{sort}」{dir}，点击切换', { sort: sortName, dir: filters.sortDir === 'desc' ? tr('降序') : tr('升序') })}
+          aria-label={tr('切换排序方向（当前按{sort}{dir}）', { sort: sortName, dir: filters.sortDir === 'desc' ? tr('降序') : tr('升序') })}
           onClick={() => onChange({ sortDir: filters.sortDir === 'desc' ? 'asc' : 'desc', page: 0 })}
         >
           {filters.sortDir === 'desc' ? '↓' : '↑'}
         </button>
-        <span className="wb-kb-hit" data-kb-hit>命中 {total.toLocaleString('zh-CN')} 条</span>
+        <span className="wb-kb-hit" data-kb-hit>{tr('命中 {n} 条', { n: total.toLocaleString() })}</span>
         <span className="wb-kb-spacer" />
-        <button type="button" className="wb-btn primary" data-kb-new onClick={onCreate}><Icon name="plus" />新建</button>
-        <button type="button" className="wb-btn" data-kb-summarize disabled={busy} onClick={onSummarizeDoc}><Icon name="file" />AI 总结本地文档</button>
-        <button type="button" className="wb-btn" disabled={!knowledgeFilterActive(filters)} data-kb-clear onClick={onClear}>清空筛选</button>
+        <button type="button" className="wb-btn primary" data-kb-new onClick={onCreate}><Icon name="plus" />{tr('新建')}</button>
+        <button type="button" className="wb-btn" data-kb-summarize disabled={busy} onClick={onSummarizeDoc}><Icon name="file" />{tr('AI 总结本地文档')}</button>
+        <button type="button" className="wb-btn" disabled={!knowledgeFilterActive(filters)} data-kb-clear onClick={onClear}>{tr('清空筛选')}</button>
       </div>
-      <TabBar tabs={tabs} selected={filters.kinds} onSelect={(code, multi) => onChange({ kinds: toggleTab(filters.kinds, code, multi), page: 0 })} ariaLabel="知识库分类" />
+      <TabBar tabs={tabs} selected={filters.kinds} onSelect={(code, multi) => onChange({ kinds: toggleTab(filters.kinds, code, multi), page: 0 })} ariaLabel={tr('知识库分类')} />
       <TagFilter tagCounts={tagCounts} selected={filters.tags} onChange={(tags) => onChange({ tags, page: 0 })} />
     </>
   )
@@ -172,16 +176,19 @@ function row(entry: ContentItem, dicts: readonly Dict[], selectedId: string | un
   )
 }
 
-export function KnowledgeList({ page, dicts, selectedId, onOpen }: {
+export function KnowledgeList({ page, dicts, selectedId, onOpen, t }: {
   page: ListPage<ContentItem>
   dicts: readonly Dict[]
   selectedId: string | undefined
   onOpen: (entry: ContentItem) => void
+  /** 可选翻译器；直接调用本组件的测试不传，退回中文并正确插值。 */
+  t?: (key: string, params?: Record<string, string | number>) => string
 }): JSX.Element {
+  const tr = t ?? ((key: string, params?: Record<string, string | number>): string => translate('zh-CN', key, params))
   if (page.total === 0) {
     return (
       <div className="wb-kb-list">
-        <div className="wb-empty" data-kb-empty>没有符合条件的知识条目</div>
+        <div className="wb-empty" data-kb-empty>{tr('没有符合条件的知识条目')}</div>
       </div>
     )
   }
@@ -190,7 +197,7 @@ export function KnowledgeList({ page, dicts, selectedId, onOpen }: {
       {page.groups.map((group: ListGroup<ContentItem>) => (
         <div key={group.name} className="wb-kb-group">
           <div className="wb-kb-ghead" data-kb-group={group.name}>
-            {group.name}
+            {tr(group.name)}
             <span className="wb-kb-gcnt">{group.items.length}</span>
             <span className="wb-kb-gline" />
           </div>
@@ -201,12 +208,14 @@ export function KnowledgeList({ page, dicts, selectedId, onOpen }: {
   )
 }
 
-export function KnowledgePager({ page, pageSize, onPage, onPageSize }: {
+export function KnowledgePager({ page, pageSize, onPage, onPageSize, t }: {
   page: ListPage<ContentItem>
   pageSize: number
   onPage: (page: number) => void
   onPageSize: (size: number) => void
+  t?: (key: string, params?: Record<string, string | number>) => string
 }): JSX.Element {
+  const tr = t ?? ((key: string, params?: Record<string, string | number>): string => translate('zh-CN', key, params))
   const around: number[] = []
   for (let p = Math.max(0, page.page - 1); p <= Math.min(page.pageTotal - 1, page.page + 1); p++) around.push(p)
   const btn = (label: string, target: number, disabled: boolean, current = false): JSX.Element => (
@@ -215,7 +224,7 @@ export function KnowledgePager({ page, pageSize, onPage, onPageSize }: {
   return (
     <div className="wb-kb-pager" data-kb-pager>
       <span>
-        第 {page.total === 0 ? 0 : page.rangeStart + 1}–{page.rangeEnd} 条 / 共 <b>{page.total.toLocaleString('zh-CN')}</b> 条
+        {tr('第 {start}–{end} 条 / 共 {total} 条', { start: page.total === 0 ? 0 : page.rangeStart + 1, end: page.rangeEnd, total: page.total.toLocaleString() })}
       </span>
       <span style={{ flex: 1 }} />
       <span className="wb-kb-pages">
@@ -225,8 +234,8 @@ export function KnowledgePager({ page, pageSize, onPage, onPageSize }: {
         {btn('›', page.page + 1, page.page >= page.pageTotal - 1)}
         {btn('»', page.pageTotal - 1, page.page >= page.pageTotal - 1)}
       </span>
-      <select className="wb-kb-pagesize" data-kb-pagesize value={pageSize} title="每页条数" onChange={(e) => onPageSize(Number(e.target.value))}>
-        {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} / 页</option>)}
+      <select className="wb-kb-pagesize" data-kb-pagesize value={pageSize} title={tr('每页条数')} onChange={(e) => onPageSize(Number(e.target.value))}>
+        {PAGE_SIZES.map((n) => <option key={n} value={n}>{tr('{n} / 页', { n })}</option>)}
       </select>
     </div>
   )

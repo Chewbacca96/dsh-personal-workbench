@@ -70,7 +70,7 @@ function fakeService({ preflight, create } = {}) {
 function invocation(rawInput, { hasSession = true, hasSteer = true } = {}) {
   const steered = []
   const agent = {}
-  if (hasSession) agent.session = { id: SESSION_ID, header: { origin: 'top', cwd: 'D:/Code/Linksight/dsh-workbench' } }
+  if (hasSession) agent.session = { id: SESSION_ID, header: { origin: 'top', cwd: 'D:/Code/<company>/dsh-workbench' } }
   if (hasSteer) agent.steer = (message) => { steered.push(message) }
   return { agent, rawInput, steered }
 }

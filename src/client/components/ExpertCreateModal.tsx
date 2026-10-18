@@ -21,6 +21,7 @@ import type { ReactNode } from 'react'
 import { EXPERT_REQUEST_MAX_CHARS } from '../../shared/expert.js'
 import { Modal } from './Modal.js'
 import type { ExpertUiError, WorkspaceChoice } from '../hooks/useWorkbenchExperts.js'
+import { useI18n } from '../i18n.js'
 
 /** 缺能力时的可读原因（三处共用同一句，避免"同一个失败两套说法"）。 */
 export const EXPERT_CREATE_UNAVAILABLE_MESSAGE =
@@ -48,42 +49,42 @@ export interface ExpertCreateModalProps {
 }
 
 export function ExpertCreateModal(props: ExpertCreateModalProps): ReactNode {
+  const { t } = useI18n()
   if (props.open === false) return null
   const { busy, error, createAvailable } = props
   const emptyRequest = props.request.trim() === ''
   const noWorkspace = props.workspaceId.trim() === ''
   const blocked = busy || createAvailable === false || emptyRequest || noWorkspace
   const reason = createAvailable === false
-    ? EXPERT_CREATE_UNAVAILABLE_MESSAGE
-    : (noWorkspace ? '先选一个工作区：生成会话只能开在已有工作区里，工作台不会替你新建目录。' : null)
+    ? t(EXPERT_CREATE_UNAVAILABLE_MESSAGE)
+    : (noWorkspace ? t('先选一个工作区：生成会话只能开在已有工作区里，工作台不会替你新建目录。') : null)
 
   return (
     <Modal
-      title="新建专家"
+      title={t('新建专家')}
       size="lg"
       onClose={props.onClose}
       footer={(
         <div className="wb-modal-actions">
-          <button className="wb-btn" onClick={props.onClose} disabled={busy}>取消</button>
+          <button className="wb-btn" onClick={props.onClose} disabled={busy}>{t('取消')}</button>
           <button
             className="wb-btn"
             data-wb-expert-action="start-generation"
             disabled={blocked}
             onClick={props.onStart}
           >
-            {busy ? '生成中…' : '开始生成'}
+            {busy ? t('生成中…') : t('开始生成')}
           </button>
         </div>
       )}
     >
       <div className="wb-field" data-wb-experts="create-modal">
         <div className="wb-hint">
-          说明你想要的专家：它负责什么、什么场景用它、有没有必须沿用的上游人格或 skill。
-          AI 会按工作台的方法论生成一份草稿，**由你确认后**才会安装到你的用户库里。
+          {t('说明你想要的专家：它负责什么、什么场景用它、有没有必须沿用的上游人格或 skill。AI 会按工作台的方法论生成一份草稿，由你确认后才会安装到你的用户库里。')}
         </div>
 
         <div className="wb-field">
-          <label htmlFor="wb-expert-create-request">需求</label>
+          <label htmlFor="wb-expert-create-request">{t('需求')}</label>
           <textarea
             id="wb-expert-create-request"
             className="wb-draft-field-v"
@@ -92,16 +93,16 @@ export function ExpertCreateModal(props: ExpertCreateModalProps): ReactNode {
             maxLength={EXPERT_REQUEST_MAX_CHARS}
             value={props.request}
             disabled={busy}
-            placeholder="例如：帮我做一个「接口联调排障」专家，先看设备日志再定位，必须能复用已有的 tcdebug skill。"
+            placeholder={t('例如：帮我做一个「接口联调排障」专家，先看设备日志再定位，必须能复用已有的 tcdebug skill。')}
             onChange={(event) => props.onChangeRequest(event.target.value)}
           />
           <div className="wb-field-note">
-            {props.request.trim().length}/{EXPERT_REQUEST_MAX_CHARS} 字符（服务端上限，超出会被拒）。
+            {t('{n}/{max} 字符（服务端上限，超出会被拒）。', { n: props.request.trim().length, max: EXPERT_REQUEST_MAX_CHARS })}
           </div>
         </div>
 
         <div className="wb-field">
-          <label htmlFor="wb-expert-create-workspace">工作区</label>
+          <label htmlFor="wb-expert-create-workspace">{t('工作区')}</label>
           <select
             id="wb-expert-create-workspace"
             data-wb-expert-field="workspace"
@@ -109,7 +110,7 @@ export function ExpertCreateModal(props: ExpertCreateModalProps): ReactNode {
             disabled={busy || props.workspaceChoices.length === 0}
             onChange={(event) => props.onChangeWorkspace(event.target.value)}
           >
-            <option value="">请选择…</option>
+            <option value="">{t('请选择…')}</option>
             {props.workspaceChoices.map((choice) => (
               <option key={choice.workspaceId} value={choice.workspaceId}>
                 {choice.path === undefined || choice.path === '' ? choice.workspaceId : choice.path}
@@ -117,7 +118,7 @@ export function ExpertCreateModal(props: ExpertCreateModalProps): ReactNode {
             ))}
           </select>
           <div className="wb-field-note">
-            生成会话开在这个工作区里（与任务资料夹无关，工作台不会替你建目录）。
+            {t('生成会话开在这个工作区里（与任务资料夹无关，工作台不会替你建目录）。')}
           </div>
         </div>
 
@@ -139,12 +140,11 @@ export function ExpertCreateModal(props: ExpertCreateModalProps): ReactNode {
         {props.generationSessionId !== null && props.generationSessionId !== '' && (
           <div className="wb-notes">
             <div className="wb-notes-body">
-              这次生成会话已经建出来了（{props.generationSessionId.slice(0, 8)}…）。
-              可以打开它继续让 AI 修改；**草稿不会被删掉**，改完仍会回来找你确认。
-              {props.generationDraftId === null ? '' : ` 草稿 id：${props.generationDraftId}`}
+              {t('这次生成会话已经建出来了（{id}…）。可以打开它继续让 AI 修改；草稿不会被删掉，改完仍会回来找你确认。', { id: props.generationSessionId.slice(0, 8) })}
+              {props.generationDraftId === null ? '' : ` ${t('草稿 id：{id}', { id: props.generationDraftId })}`}
             </div>
             <div className="wb-detail-actions">
-              <button className="wb-btn" onClick={props.onOpenSession}>打开生成会话</button>
+              <button className="wb-btn" onClick={props.onOpenSession}>{t('打开生成会话')}</button>
             </div>
           </div>
         )}

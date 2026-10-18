@@ -371,7 +371,7 @@ test('AX-E50: 一份专家 service —— 路由 / 工具 / skills 子 fiber 共
     const started = await server.request('POST', '/api/workbench/experts/generation-start', {
       sessionId: BOUND_SESSION,
       request: '帮我做一个需求审查专家',
-      workspaceId: 'D:/Code/Linksight/dsh-workbench',
+      workspaceId: 'D:/Code/<company>/dsh-workbench',
     })
     assert.equal(started.status, 200)
     const draftId = started.body.draft.draftId

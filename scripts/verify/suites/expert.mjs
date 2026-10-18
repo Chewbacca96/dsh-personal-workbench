@@ -53,7 +53,7 @@ const AX = ['AX-E59', 'AX-E60', 'AX-E61', 'AX-E62']
 const P8_AX = ['AX-E52', 'AX-E53', 'AX-E54', 'AX-E55', 'AX-E56', 'AX-E57', 'AX-E58']
 const ROOT = repoRootFromSuite()
 /**
- * ⚠️ 会话目录的项目键有**前后各两条横线**（实测 `--D-Code-Linksight-dsh-workbench--`）。
+ * ⚠️ 会话目录的项目键有**前后各两条横线**（实测 `--D-Code-<company>-dsh-workbench--`）。
  * 映射规则（P10 实测反推）：路径里的 **`:` 直接删掉**（盘符不占位），`\` 与 `.` 换成 `-`，
  * 再在两端各加 `--`。`repoRootFromSuite()` 返回的路径还带**尾部分隔符**，所以先去尾部斜杠。
  * 两处都坑过 P10 的中间几次单跑（键算错 ⇒ `startsWith` 恒假 ⇒ 所有新会话都判成"不是这个仓库的"，
@@ -1312,7 +1312,7 @@ function expertInUserLibrary(expertId) {
 /**
  * 在**真实的 `start-generation` 弹窗**里发起一次生成（AX-E60 的入口动作）。
  *
- * 工作区**刻意选仓库自己那个**（`D:\Code\Linksight\dsh-workbench`）而不是"第一个选项"：
+ * 工作区**刻意选仓库自己那个**（`D:\Code\<company>\dsh-workbench`）而不是"第一个选项"：
  * P10 首跑用 `options[0]` 落到 `D:\Game\Minecraft`，生成会话就被开在了另一个项目目录里 ——
  * 会话记录在哪个项目键下取决于 `workspaceId` 指向的路径，选错会让"找会话目录"这一步
  * 变得不可判。这里按 `<option>` 的**展示文案**匹配（宿主的 option value 就是 path）。

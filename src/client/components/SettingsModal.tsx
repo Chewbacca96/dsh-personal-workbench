@@ -12,6 +12,7 @@ import type { DraftView } from '../../shared/contracts.js'
 import { Modal } from './Modal.js'
 import { PersonaAdmin } from './PersonaAdmin.js'
 import { ExpertCreateModal } from './ExpertCreateModal.js'
+import { useI18n } from '../i18n.js'
 import type { UseWorkbenchExpertsResult } from '../hooks/useWorkbenchExperts.js'
 import { notificationStateText, type NotificationState } from '../notificationCapability.js'
 
@@ -162,6 +163,7 @@ export function SettingsModal(props: SettingsModalProps): ReactNode {
     onClose,
   } = props
 
+  const { t } = useI18n()
   const dictOf = (kind: string): DictionaryLike[] => dicts.filter((entry) => entry.kind === kind)
   const targets: ReminderBotOption['targets'] = useMemo(
     () => reminderOptions?.bots.find((bot) => bot.botId === reminderChannel?.botId)?.targets ?? [],
@@ -170,24 +172,24 @@ export function SettingsModal(props: SettingsModalProps): ReactNode {
 
   return (
     <Modal
-      title="工作台设置"
+      title={t('工作台设置')}
       size="lg"
       onClose={onClose}
       footer={(
         <>
-          <span className="wb-foot-note">设置保存在本机工作台数据库，不影响 DSH 其他配置</span>
-          <button className="wb-btn" onClick={onClose}>取消</button>
+          <span className="wb-foot-note">{t('设置保存在本机工作台数据库，不影响 DSH 其他配置')}</span>
+          <button className="wb-btn" onClick={onClose}>{t('取消')}</button>
           <button className="wb-btn primary" disabled={saving} onClick={() => void onSaveSettings()}>
-            {saving ? '保存中…' : '保存设置'}
+            {saving ? t('保存中…') : t('保存设置')}
           </button>
         </>
       )}
     >
       <div className="wb-settings">
-        <nav className="wb-settings-nav" aria-label="设置分区">
+        <nav className="wb-settings-nav" aria-label={t('设置')}>
           {SECTIONS.map((item) => (
             <button key={item.key} className={section === item.key ? 'on' : ''} onClick={() => setSection(item.key)}>
-              {item.label}
+              {t(item.label)}
               {item.key === 'wechat' && reminderChannel?.queued !== undefined && reminderChannel.queued > 0 && (
                 <span className="dot" title={`队列中 ${reminderChannel.queued} 条待发`} />
               )}
@@ -198,9 +200,26 @@ export function SettingsModal(props: SettingsModalProps): ReactNode {
         <div className="wb-settings-pane">
           {section === 'general' && (
             <section>
-              <h5>AI 会话工作区</h5>
+              {/**
+                * 界面语言（issue #12）：`auto` 跟随浏览器，其余是显式选择。
+                * 文案本身走 t()：英文用户打开设置时至少这一项立刻是英文。
+                */}
+              <h5>{t('语言')}</h5>
               <div className="wb-field">
-                <span>默认工作区（任务未指定时使用）</span>
+                <span>{t('界面语言')}</span>
+                <select
+                  value={settings.uiLocale}
+                  onChange={(e) => onSettingsChange({ ...settings, uiLocale: e.target.value as WorkbenchSettings['uiLocale'] })}
+                >
+                  <option value="auto">{t('自动（跟随浏览器）')}</option>
+                  <option value="zh-CN">中文</option>
+                  <option value="en-US">English</option>
+                </select>
+                <div className="wb-hint">{t('选择工作台界面语言；自动 = 跟随浏览器语言')}</div>
+              </div>
+              <h5>{t('AI 会话工作区')}</h5>
+              <div className="wb-field">
+                <span>{t('默认工作区（任务未指定时使用）')}</span>
                 <input
                   value={settings.defaultWorkspace}
                   onChange={(e) => onSettingsChange({ ...settings, defaultWorkspace: e.target.value })}
@@ -214,8 +233,8 @@ export function SettingsModal(props: SettingsModalProps): ReactNode {
                   onChange={(e) => onSettingsChange({ ...settings, autoCreateTypeFolders: e.target.checked })}
                 />
                 <span>
-                  自动为每个任务创建独立文件夹
-                  <span className="wb-switch-desc">关闭后所有任务共用默认工作区；父任务设了工作区时，未单独设置子任务会跟随父任务。</span>
+                  {t('自动为每个任务创建独立文件夹')}
+                  <span className="wb-switch-desc">{t('关闭后所有任务共用默认工作区；父任务设了工作区时，未单独设置子任务会跟随父任务。')}</span>
                 </span>
               </label>
             </section>
@@ -234,26 +253,26 @@ export function SettingsModal(props: SettingsModalProps): ReactNode {
             */}
           {section === 'persona' && (
             <section>
-              <h5>外部角色目录</h5>
+              <h5>{t('外部角色目录')}</h5>
               <div className="wb-field">
-                <span>可留空；例如 （外部角色目录）</span>
+                <span>{t('可留空；例如 （外部角色目录）')}</span>
                 <input
                   value={settings.personaExternalDir}
                   onChange={(e) => onSettingsChange({ ...settings, personaExternalDir: e.target.value })}
-                  placeholder="留空 = 只用内置角色库与用户库"
+                  placeholder={t('留空 = 只用内置角色库与用户库')}
                 />
               </div>
 
               <details className="wb-notes">
-                <summary>使用说明（角色是什么 / 来源优先级 / 停用会怎样）</summary>
+                <summary>{t('使用说明（角色是什么 / 来源优先级 / 停用会怎样）')}</summary>
                 <div className="wb-notes-body">
-                  <p><b>角色 = 一份 .md</b>（`# 名称` + 引用块元信息 + 正文），工具按名称逐字使用。</p>
-                  <p><b>三级来源，前者优先：</b>用户库（~/.dsh/workbench/personas）&gt; 外部角色目录 &gt; 内置 15 篇（6 篇通用工作方式 + 9 篇领域岗位）。列表里每行右侧标出它来自哪一级。</p>
-                  <p><b>内置 / 外部角色只读</b>：工作台不复制、不修改、不覆盖它们；<b>新建专家仅在用户确认后写入用户库</b>（AI 只先暂存成草稿，确认前不落盘）。</p>
-                  <p><b>停用</b>的角色仍会列在下表里（否则启用不回来），只是不能在选择器中选中。</p>
-                  <p><b>收藏</b>只影响选择器里的「只看收藏」筛选，不改变角色本身的可用性。</p>
-                  <p>角色正文与资源由 <code>workbench_load_persona</code> / <code>workbench_read_persona_resource</code> 按需读取，<b>不预先塞进提示词</b>。</p>
-                  <p className="wb-notes-warn">本页的收藏 / 停用与「允许 AI 自主召唤专家」是<b>点一下立刻生效</b>（不等「保存设置」）；上面的外部目录属于设置草稿，要按「保存设置」才生效。</p>
+                  <p><b>{t('角色 = 一份 .md')}</b>（<code># 名称</code> + {t('引用块元信息 + 正文），工具按名称逐字使用。')}</p>
+                  <p><b>{t('三级来源，前者优先：')}</b>{t('用户库（~/.dsh/workbench/personas）> 外部角色目录 > 内置 15 篇（6 篇通用工作方式 + 9 篇领域岗位）。列表里每行右侧标出它来自哪一级。')}</p>
+                  <p><b>{t('内置 / 外部角色只读')}</b>：{t('工作台不复制、不修改、不覆盖它们。')}<b>{t('新建专家只在用户确认后写入用户库')}</b>{t('（AI 只先暂存成草稿，确认前不落盘）。')}</p>
+                  <p><b>{t('停用')}</b>{t('的角色仍会列在下表里（否则启用不回来），只是不能在选择器中选中。')}</p>
+                  <p><b>{t('收藏')}</b>{t('只影响选择器里的「只看收藏」筛选，不改变角色本身的可用性。')}</p>
+                  <p>{t('角色正文与资源由')} <code>workbench_load_persona</code> / <code>workbench_read_persona_resource</code> {t('按需读取，不预先塞进提示词。')}</p>
+                  <p className="wb-notes-warn">{t('本页的收藏 / 停用与「允许 AI 自主召唤专家」是点一下立刻生效（不等「保存设置」）；上面的外部目录属于设置草稿，要按「保存设置」才生效。')}</p>
                 </div>
               </details>
 
@@ -307,9 +326,9 @@ export function SettingsModal(props: SettingsModalProps): ReactNode {
                 规则全文在任务页的「规则」面板里（CapacityRulePanel），这里只放两个开关，
                 并各写一句"它会怎样影响读数"。
               */}
-              <h5 style={{ marginTop: 18 }}>今日容量</h5>
+              <h5 style={{ marginTop: 18 }}>{t('今日容量')}</h5>
               <div className="wb-field">
-                <span>默认耗时（任务没填「预计耗时」时按它计入，分钟）</span>
+                <span>{t('默认耗时（任务没填「预计耗时」时按它计入，分钟）')}</span>
                 <input
                   type="number"
                   min={5}
@@ -323,7 +342,7 @@ export function SettingsModal(props: SettingsModalProps): ReactNode {
                     onSettingsChange({ ...settings, defaultEstimateMinutes: next })
                   }}
                 />
-                <span className="wb-hint">可设 5–1440；任务自己的耗时优先于它。</span>
+                <span className="wb-hint">{t('可设 5–1440；任务自己的耗时优先于它。')}</span>
               </div>
               <label className="wb-switch-row">
                 <input
@@ -332,11 +351,9 @@ export function SettingsModal(props: SettingsModalProps): ReactNode {
                   onChange={(e) => onSettingsChange({ ...settings, dailyCapacityIncludeOverdue: e.target.checked })}
                 />
                 <span>
-                  把逾期任务计入今日容量
+                  {t('把逾期任务计入今日容量')}
                   <span className="wb-switch-desc">
-                    默认关闭：逾期是历史欠账，混进"今天要做的事"会让「已排」失去意义。
-                    打开后，未完成且截止时间早于今天 0 点的任务也会计入（读数会明显变大）。
-                    任务页的「今日容量 → 规则」面板里有同样的开关，两处写同一个设置。
+                    {t('默认关闭：逾期是历史欠账，混进"今天要做的事"会让「已排」失去意义。打开后，未完成且截止时间早于今天 0 点的任务也会计入（读数会明显变大）。任务页的「今日容量 → 规则」面板里有同样的开关，两处写同一个设置。')}
                   </span>
                 </span>
               </label>
@@ -467,7 +484,7 @@ export function SettingsModal(props: SettingsModalProps): ReactNode {
                     <div className="wb-banner error" style={{ margin: '10px 0' }}>
                       <h4>微信通道被 iLink 限流</h4>
                       <div style={{ fontSize: 12.5 }}>
-                        {reminderChannel.circuitUntil === null ? '' : `${new Date(reminderChannel.circuitUntil).toLocaleTimeString('zh-CN', { hour12: false })} 前不发送。`}
+                        {reminderChannel.circuitUntil === null ? '' : `${new Date(reminderChannel.circuitUntil).toLocaleTimeString(undefined, { hour12: false })} 前不发送。`}
                         让手机微信给机器人发一条消息即可立即恢复。
                       </div>
                     </div>

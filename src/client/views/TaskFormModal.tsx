@@ -33,6 +33,7 @@ import { WorkspacePicker } from '../components/WorkspacePicker.js'
 import type { WorkspaceCandidate } from '../workspacePicker.js'
 import type { Dict } from '../viewTypes.js'
 import type { TaskEditDraft } from '../app/contracts.js'
+import { useI18n } from '../i18n.js'
 
 /** 新建任务弹窗的 props（跨域依赖全部显式注入；本组件不发请求）。 */
 export type TaskCreateModalProps = {
@@ -61,29 +62,30 @@ export function TaskCreateModal({
   open, onClose, onSubmit, dictOf, defaultEstimateMinutes, defaultWorkspace,
   workspaceChoices, formWorkspace, onFormWorkspaceChange, onBrowseWorkspace, busy,
 }: TaskCreateModalProps): JSX.Element | null {
+  const { t } = useI18n()
   if (!open) return null
 
   return (
     <Modal
-      title={<><Icon name="plus" />新建任务</>}
+      title={<><Icon name="plus" />{t('新建任务')}</>}
       size="md"
       onClose={onClose}
     >
       <form className="wb-form" id="wb-new-task-form" onSubmit={(e) => { e.preventDefault(); onSubmit(new FormData(e.currentTarget)) }}>
-        <label className="full">标题<input name="title" required placeholder="要做什么？" /></label>
-        <label>类型<select name="type" defaultValue="client_meeting">{dictOf('type').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
-        <label>优先级<select name="priority" defaultValue="p2">{dictOf('priority').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
-        <label>状态<select name="status" defaultValue="todo">{dictOf('status').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
-        <label>截止时间<input name="due" type="datetime-local" /></label>
-        <label>重复<select name="recurrence" defaultValue="none">{dictOf('recurrence').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
+        <label className="full">{t('标题')}<input name="title" required placeholder={t('要做什么？')} /></label>
+        <label>{t('类型')}<select name="type" defaultValue="client_meeting">{dictOf('type').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
+        <label>{t('优先级')}<select name="priority" defaultValue="p2">{dictOf('priority').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
+        <label>{t('状态')}<select name="status" defaultValue="todo">{dictOf('status').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
+        <label>{t('截止时间')}<input name="due" type="datetime-local" /></label>
+        <label>{t('重复')}<select name="recurrence" defaultValue="none">{dictOf('recurrence').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
         {/* 与编辑弹窗同一套字段与文案：同一字段两个入口两套说法 = 迟早打架 */}
-        <label>耗时（分钟）<input name="estimatedMinutes" type="number" min={1} max={1440} step={5} placeholder={`留空 = 默认 ${defaultEstimateMinutes} 分钟`} /></label>
+        <label>{t('耗时（分钟）')}<input name="estimatedMinutes" type="number" min={1} max={1440} step={5} placeholder={t('留空 = 默认 {n} 分钟', { n: defaultEstimateMinutes })} /></label>
         <label style={{ alignSelf: 'end' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
             <input name="allDay" type="checkbox" />
-            全天任务
+            {t('全天任务')}
           </span>
-          <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-secondary)' }}>只影响显示与重复锚点，不改变容量计算</span>
+          <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-secondary)' }}>{t('只影响显示与重复锚点，不改变容量计算')}</span>
         </label>
         {/**
           * 批次2 #2：与快速录入、编辑任务**同一个组件**（两种选法：已有工作区下拉 + 浏览文件夹）。
@@ -94,19 +96,19 @@ export function TaskCreateModal({
           <WorkspacePicker
             value={formWorkspace}
             touched={false}
-            sourceLabel="留空 = 用默认工作区"
+            sourceLabel={t('留空 = 用默认工作区')}
             candidates={workspaceChoices}
             disabled={busy}
-            placeholder={defaultWorkspace || '默认工作区未设置'}
+            placeholder={defaultWorkspace || t('默认工作区未设置')}
             onChange={onFormWorkspaceChange}
             onBrowse={onBrowseWorkspace}
           />
           <input type="hidden" name="workspacePath" value={formWorkspace} />
         </div>
-        <label className="full">描述<textarea name="description" rows={2} placeholder="背景 / 目标 / 验收标准（Markdown）" /></label>
+        <label className="full">{t('描述')}<textarea name="description" rows={2} placeholder={t('背景 / 目标 / 验收标准（Markdown）')} /></label>
         <div className="full" style={{ display: 'flex', gap: 8 }}>
-          <button className="wb-btn primary lg" type="submit"><Icon name="check" />保存任务</button>
-          <button className="wb-btn" type="button" onClick={onClose}>取消</button>
+          <button className="wb-btn primary lg" type="submit"><Icon name="check" />{t('保存任务')}</button>
+          <button className="wb-btn" type="button" onClick={onClose}>{t('取消')}</button>
         </div>
       </form>
     </Modal>
@@ -141,63 +143,64 @@ export function TaskEditModal({
   draft, recurrenceMasterId, onClose, onSave, onPatchDraft, dictOf, defaultEstimateMinutes,
   defaultWorkspace, workspaceChoices, onBrowseWorkspace, busy, reparentCandidates,
 }: TaskEditModalProps): JSX.Element {
+  const { t } = useI18n()
   return (
     <Modal
-      title={<><Icon name="edit" />编辑任务</>}
+      title={<><Icon name="edit" />{t('编辑任务')}</>}
       size="md"
       onClose={onClose}
       footer={(
         <>
-          <button className="wb-btn" onClick={onClose}>取消</button>
+          <button className="wb-btn" onClick={onClose}>{t('取消')}</button>
           <button className="wb-btn primary" disabled={draft.title.trim() === ''} onClick={onSave}>
-            <Icon name="check" />保存
+            <Icon name="check" />{t('保存')}
           </button>
         </>
       )}
     >
       <div className="wb-form" style={{ border: 'none', padding: 0 }}>
-        <label className="full">标题<input value={draft.title} onChange={(e) => onPatchDraft({ title: e.target.value })} /></label>
-        <label>类型<select value={draft.typeCode} onChange={(e) => onPatchDraft({ typeCode: e.target.value })}>{dictOf('type').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
-        <label>优先级<select value={draft.priorityCode} onChange={(e) => onPatchDraft({ priorityCode: e.target.value })}>{dictOf('priority').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
-        <label>状态<select value={draft.statusCode} onChange={(e) => onPatchDraft({ statusCode: e.target.value })}>{dictOf('status').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
-        <label>AI 策略<select value={draft.aiPolicyCode} onChange={(e) => onPatchDraft({ aiPolicyCode: e.target.value })}>{dictOf('ai_policy').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
+        <label className="full">{t('标题')}<input value={draft.title} onChange={(e) => onPatchDraft({ title: e.target.value })} /></label>
+        <label>{t('类型')}<select value={draft.typeCode} onChange={(e) => onPatchDraft({ typeCode: e.target.value })}>{dictOf('type').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
+        <label>{t('优先级')}<select value={draft.priorityCode} onChange={(e) => onPatchDraft({ priorityCode: e.target.value })}>{dictOf('priority').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
+        <label>{t('状态')}<select value={draft.statusCode} onChange={(e) => onPatchDraft({ statusCode: e.target.value })}>{dictOf('status').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
+        <label>{t('AI 策略')}<select value={draft.aiPolicyCode} onChange={(e) => onPatchDraft({ aiPolicyCode: e.target.value })}>{dictOf('ai_policy').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
         {recurrenceMasterId === null
-          ? <label>重复<select value={draft.recurrenceCode} onChange={(e) => onPatchDraft({ recurrenceCode: e.target.value })}>{dictOf('recurrence').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
-          : <div style={{ fontSize: 12, color: '#999', alignSelf: 'center' }}>重复：由模板任务管理</div>}
-        <label>截止时间<input type="datetime-local" value={draft.dueLocal} onChange={(e) => onPatchDraft({ dueLocal: e.target.value })} /></label>
+          ? <label>{t('重复')}<select value={draft.recurrenceCode} onChange={(e) => onPatchDraft({ recurrenceCode: e.target.value })}>{dictOf('recurrence').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
+          : <div style={{ fontSize: 12, color: '#999', alignSelf: 'center' }}>{t('重复：由模板任务管理')}</div>}
+        <label>{t('截止时间')}<input type="datetime-local" value={draft.dueLocal} onChange={(e) => onPatchDraft({ dueLocal: e.target.value })} /></label>
         {/* ---------------- 预计耗时 / 全天任务（v1.15.1） ---------------- */}
-        <label>耗时（分钟）<input type="number" min={1} max={1440} step={5} value={draft.estimatedMinutes} placeholder={`留空 = 默认 ${defaultEstimateMinutes} 分钟`} onChange={(e) => onPatchDraft({ estimatedMinutes: e.target.value })} /></label>
+        <label>{t('耗时（分钟）')}<input type="number" min={1} max={1440} step={5} value={draft.estimatedMinutes} placeholder={t('留空 = 默认 {n} 分钟', { n: defaultEstimateMinutes })} onChange={(e) => onPatchDraft({ estimatedMinutes: e.target.value })} /></label>
         <label style={{ alignSelf: 'end' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
             <input type="checkbox" checked={draft.allDay} onChange={(e) => onPatchDraft({ allDay: e.target.checked })} />
-            全天任务
+            {t('全天任务')}
           </span>
-          <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-secondary)' }}>只影响显示与重复锚点，不改变容量计算</span>
+          <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-secondary)' }}>{t('只影响显示与重复锚点，不改变容量计算')}</span>
         </label>
         <p className="wb-hint" style={{ gridColumn: '1 / -1', margin: '0 0 4px' }}>
-          {`耗时改完立即影响今日容量的「已排」；留空 = 按默认 ${defaultEstimateMinutes} 分钟计入。`}
+          {t('耗时改完立即影响今日容量的「已排」；留空 = 按默认 {n} 分钟计入。', { n: defaultEstimateMinutes })}
         </p>
         <div className="full">
           <WorkspacePicker
             value={draft.workspacePath}
             touched={false}
-            sourceLabel="留空 = 继承父任务，父任务也没有才用默认"
+            sourceLabel={t('留空 = 继承父任务，父任务也没有才用默认')}
             candidates={workspaceChoices}
             disabled={busy}
-            placeholder={defaultWorkspace || '默认工作区未设置'}
+            placeholder={defaultWorkspace || t('默认工作区未设置')}
             onChange={(path) => onPatchDraft({ workspacePath: path })}
             onBrowse={onBrowseWorkspace}
           />
         </div>
-        <label className="full">描述（Markdown）<textarea rows={6} value={draft.description} onChange={(e) => onPatchDraft({ description: e.target.value })} /></label>
+        <label className="full">{t('描述（Markdown）')}<textarea rows={6} value={draft.description} onChange={(e) => onPatchDraft({ description: e.target.value })} /></label>
         {/* ---------------- 改父任务（v1.14.0） ---------------- */}
         <label className="full">
-          父任务
+          {t('父任务')}
           <select
             value={draft.parentId}
             onChange={(e) => onPatchDraft({ parentId: e.target.value })}
           >
-            <option value="">（顶层）</option>
+            <option value="">{t('（顶层）')}</option>
             {reparentCandidates.map((candidate) => (
               <option key={candidate.id} value={candidate.id}>
                 {'\u00a0'.repeat(candidate.depth * 2)}{candidate.title}
@@ -206,8 +209,7 @@ export function TaskEditModal({
           </select>
         </label>
         <p className="wb-hint" style={{ gridColumn: '1 / -1', margin: '0 0 4px' }}>
-          移动子树：后代跟随一起移动。候选里不列出自身与自身后代（会形成环）；
-          服务端另有独立防环校验，失败会给出中文原因。移动会写入任务详情的「记录」页签。
+          {t('移动子树：后代跟随一起移动。候选里不列出自身与自身后代（会形成环）；服务端另有独立防环校验，失败会给出可读原因。移动会写入任务详情的「记录」页签。')}
         </p>
       </div>
     </Modal>

@@ -133,8 +133,21 @@ export function WorkbenchBody(props: WorkbenchAssembly): JSX.Element {
            */
           experts={props.experts}
           pendingExpertDrafts={props.draftsApi.allPendingDrafts.filter((draft) => draft.kindCode === 'expert')}
-          onOpenExpertDraft={(draft) => { void props.draftsApi.actions.resumePendingDraft(draft) }}
-          onEditExpertDraft={(draft) => props.experts.actions.openGenerationSession(draft)}
+          /**
+           * 「查看草稿」/「继续修改」都**先收设置弹窗**：
+           * 草稿横幅是右下角的非模态浮卡，设置弹窗还在时它要么被挡在后面（同 z-index 时
+           * 后渲染的弹窗赢），要么把会话切换挡在弹窗后面 —— 实测点「继续修改」后
+           * `dsh.sessions.current` 已经切到生成会话，但用户仍停在设置页，看起来像没反应。
+           */
+          onOpenExpertDraft={(draft) => {
+            setShowSettings(false)
+            void props.draftsApi.actions.resumePendingDraft(draft)
+          }}
+          onEditExpertDraft={(draft) => {
+            setShowSettings(false)
+            props.draftsApi.actions.dismissDraft(draft)
+            props.experts.actions.openGenerationSession(draft)
+          }}
           onClose={() => setShowSettings(false)}
         />
       )}

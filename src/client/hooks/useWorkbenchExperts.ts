@@ -570,6 +570,22 @@ function provenanceLines(provenance: ExpertProvenance | null): string[] {
  * `dependency-unavailable`（必需技能缺失）等行仍然**可见**（管理页要能看到原因）。
  */
 export function expertRowView(row: ExpertCatalogRow): ExpertRowView {
+  const sourceLabel = SOURCE_LABELS[row.source] ?? '未知来源'
+  const sourceKeyLabel = safeSourceKeyLabel(row.source, row.sourceKey)
+  /**
+   * 列表那一行只在有信息时显示来源键：内置 / 用户库的 sourceKeyLabel
+   * 与 sourceLabel 是同一个词（实测渲染成「内置｜domain｜内置｜…」），
+   * 重复一遍既占宽度又像两套来源。外部目录才会给出「外部目录 · <目录名>」。
+   */
+  const distinctSourceKey = sourceKeyLabel === sourceLabel ? '' : sourceKeyLabel
+  /**
+   * 内置角色本来就没有上游来源（它们随包发布），把 unrecorded 统一渲染成
+   * 「来源未登记（可用，但无法追溯上游）」会让整张列表看起来像在报错。
+   * 用户库/外部目录里的 unrecorded 仍然保留这句话（那才是有意义的提示）。
+   */
+  const provenanceLabel = row.source === 'builtin' && row.provenanceState === 'unrecorded'
+    ? ''
+    : (PROVENANCE_LABELS[row.provenanceState] ?? '来源状态未知')
   return {
     id: row.id,
     name: row.name !== '' ? row.name : row.id,
@@ -577,9 +593,9 @@ export function expertRowView(row: ExpertCatalogRow): ExpertRowView {
     group: row.group,
     status: row.status,
     statusLabel: EXPERT_STATUS_LABELS[row.status] ?? row.status,
-    sourceLabel: SOURCE_LABELS[row.source] ?? '未知来源',
-    sourceKeyLabel: safeSourceKeyLabel(row.source, row.sourceKey),
-    provenanceLabel: PROVENANCE_LABELS[row.provenanceState] ?? '来源状态未知',
+    sourceLabel,
+    sourceKeyLabel: distinctSourceKey,
+    provenanceLabel,
     sourceLines: provenanceLines(row.provenance),
     skillLines: row.requiredSkills.map(skillLine),
     issueLines: row.issues.map((issue) => issue.message),

@@ -10,6 +10,7 @@ import { Icon } from '../components/Icon.js'
 import { isTaskFilterEmpty, type TaskSortKey } from '../taskFilterSort.js'
 import type { UseTaskListModelResult } from '../hooks/useTaskListModel.js'
 import type { Dict, Task } from '../viewTypes.js'
+import { useI18n } from '../i18n.js'
 
 export type TaskListViewProps = {
   model: UseTaskListModelResult
@@ -22,17 +23,18 @@ export type TaskListViewProps = {
 }
 
 export function TaskListView({ model, dictOf, dicts, selectedId, pending, childrenOf, onOpen }: TaskListViewProps): JSX.Element {
+  const { t } = useI18n()
   return (
     <>
               <div style={{ position: 'relative', zIndex: 25, display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <input
                   style={{ position: 'relative', zIndex: 25, flex: 1, minWidth: 140, background: 'var(--dsw-alias-bg-base,#17171a)', border: '1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.15))', color: 'inherit', borderRadius: 8, padding: '7px 10px' }}
-                  placeholder="搜索标题 / 描述"
+                  placeholder={t('搜索标题 / 描述')}
                   value={model.filter.keyword}
                   onChange={(e) => model.actions.patchFilter({ keyword: e.target.value })}
                 />
                 <MultiSelectDropdown
-                  label="状态"
+                  label={t('状态')}
                   options={dictOf('status')}
                   selected={model.filter.statusCodes}
                   open={model.openFilter === 'status'}
@@ -41,7 +43,7 @@ export function TaskListView({ model, dictOf, dicts, selectedId, pending, childr
                   onChange={(codes) => model.actions.patchFilter({ statusCodes: codes })}
                 />
                 <MultiSelectDropdown
-                  label="优先级"
+                  label={t('优先级')}
                   options={dictOf('priority')}
                   selected={model.filter.priorityCodes}
                   open={model.openFilter === 'priority'}
@@ -53,36 +55,36 @@ export function TaskListView({ model, dictOf, dicts, selectedId, pending, childr
               {/* 类型从「多选下拉」升为 Tab（与知识库一致）；点=单选，Ctrl/Cmd+点=多选。
                   状态与优先级仍保留下拉（同维度多选在那里更合适）。 */}
               <TabBar
-                tabs={model.typeTabs}
+                tabs={model.typeTabs.map((tab) => (tab.code === ALL ? { ...tab, name: t('全部') } : tab))}
                 selected={model.filter.typeCodes.length === 0 ? [ALL] : model.filter.typeCodes}
                 onSelect={(code, multi) => model.actions.selectType(code, multi)}
-                ariaLabel="任务类型"
+                ariaLabel={t('任务类型')}
               />
               <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>排序</span>
+                <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('排序')}</span>
                 <select
                   style={{ background: 'var(--dsw-alias-bg-base,#17171a)', border: '1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.15))', color: 'inherit', borderRadius: 8, padding: '7px 10px' }}
                   value={model.sortKey}
                   onChange={(e) => model.actions.setSortKey(e.target.value as TaskSortKey)}
                 >
-                  <option value="dueAt">截止时间</option>
-                  <option value="priority">优先级</option>
-                  <option value="createdAt">创建时间</option>
-                  <option value="title">标题</option>
+                  <option value="dueAt">{t('截止时间')}</option>
+                  <option value="priority">{t('优先级')}</option>
+                  <option value="createdAt">{t('创建时间')}</option>
+                  <option value="title">{t('标题')}</option>
                 </select>
-                <button className="wb-btn" onClick={() => model.actions.toggleSortDir()} title={model.sortDir === 'asc' ? '当前升序，点击切换为降序' : '当前降序，点击切换为升序'}>
-                  {model.sortDir === 'asc' ? '↑ 升序' : '↓ 降序'}
+                <button className="wb-btn" onClick={() => model.actions.toggleSortDir()} title={model.sortDir === 'asc' ? t('当前升序，点击切换为降序') : t('当前降序，点击切换为升序')}>
+                  {model.sortDir === 'asc' ? t('↑ 升序') : t('↓ 降序')}
                 </button>
-                <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>共 {countTaskTree(model.visibleTree)} 条</span>
+                <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('共 {n} 条', { n: countTaskTree(model.visibleTree) })}</span>
                 <div style={{ flex: 1 }} />
-                <button className="wb-btn" disabled={isTaskFilterEmpty(model.filter)} onClick={() => model.actions.clearFilter()}><Icon name="refresh" />清空</button>
-                <button className="wb-btn" onClick={() => model.actions.toggleArchived()}>{model.archivedMode ? '返回任务' : '查看归档'}</button>
+                <button className="wb-btn" disabled={isTaskFilterEmpty(model.filter)} onClick={() => model.actions.clearFilter()}><Icon name="refresh" />{t('清空')}</button>
+                <button className="wb-btn" onClick={() => model.actions.toggleArchived()}>{model.archivedMode ? t('返回任务') : t('查看归档')}</button>
               </div>
               <div className="wb-list">
                 <TaskTreeRows roots={model.visibleTree} depth={0} expanded={model.expanded} toggle={model.actions.toggleExpanded} dicts={dicts} onOpen={onOpen} selectedId={selectedId} pending={pending} childrenOf={childrenOf} />
-                {model.archivedMode && model.sourceEmpty && <div className="wb-empty">没有归档任务</div>}
-                {!model.archivedMode && model.sourceEmpty && <div className="wb-empty">还没有任务，点“快速录入”或“新建”开始</div>}
-                {!isTaskFilterEmpty(model.filter) && model.visibleTree.length === 0 && <div className="wb-empty">没有符合条件的任务，点“清空”恢复完整列表</div>}
+                {model.archivedMode && model.sourceEmpty && <div className="wb-empty">{t('没有归档任务')}</div>}
+                {!model.archivedMode && model.sourceEmpty && <div className="wb-empty">{t('还没有任务，点“快速录入”或“新建”开始')}</div>}
+                {!isTaskFilterEmpty(model.filter) && model.visibleTree.length === 0 && <div className="wb-empty">{t('没有符合条件的任务，点“清空”恢复完整列表')}</div>}
               </div>
     </>
   )

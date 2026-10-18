@@ -12,6 +12,7 @@ import {
   KnowledgeList, KnowledgePager, KnowledgeToolbar, kindTabs,
 } from '../components/KnowledgeList.js'
 import { LocalDocModal } from '../components/LocalDocModal.js'
+import { useI18n } from '../i18n.js'
 import type { KnowledgeDictFn, UseKnowledgeResult } from '../hooks/useKnowledge.js'
 
 export interface KnowledgeListViewProps {
@@ -24,13 +25,14 @@ export interface KnowledgeListViewProps {
 }
 
 export function KnowledgeListView({ model, dictOf, busy }: KnowledgeListViewProps): JSX.Element {
+  const { t } = useI18n()
   const { entries, filters, page, selected, filePicker, dicts } = model
   return (
     <>
       {/* 本地文档三件套已收进弹窗（LocalDocModal）；工具栏只留一个按钮，和「新建」「清空筛选」同一行右对齐 */}
       <KnowledgeToolbar
         filters={filters}
-        tabs={kindTabs(dicts, page.tabCounts)}
+        tabs={kindTabs(dicts, page.tabCounts, { all: t('全部'), other: t('其他') })}
         tagCounts={page.tagCounts}
         total={page.total}
         onChange={model.updateFilters}
@@ -38,13 +40,14 @@ export function KnowledgeListView({ model, dictOf, busy }: KnowledgeListViewProp
         onCreate={() => model.startCreate()}
         onSummarizeDoc={filePicker.openPicker}
         busy={busy}
+        t={t}
       />
       {entries.length === 0 ? (
         <div className="wb-empty" style={{ padding: '28px 18px' }}>
           <div style={{ marginBottom: 6, color: 'var(--dsw-alias-state-business-primary, #4f8ef7)' }}><Icon name="book" size={30} /></div>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>还没有知识条目</div>
-          <div style={{ fontSize: 12, opacity: .8, marginBottom: 12 }}>沉淀经验教训、决策和可复用片段；也可以在 AI 复盘后一键写入</div>
-          <button className="wb-btn primary" onClick={() => model.startCreate()}>新建知识</button>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('还没有知识条目')}</div>
+          <div style={{ fontSize: 12, opacity: .8, marginBottom: 12 }}>{t('沉淀经验教训、决策和可复用片段；也可以在 AI 复盘后一键写入')}</div>
+          <button className="wb-btn primary" onClick={() => model.startCreate()}>{t('新建知识')}</button>
         </div>
       ) : (
         <>
@@ -54,12 +57,14 @@ export function KnowledgeListView({ model, dictOf, busy }: KnowledgeListViewProp
             selectedId={selected?.id}
             // 拆前是 `entries.find(e => e.id === item.id)` 再 setSelectedKnowledge —— 同一个结果。
             onOpen={(item) => model.openEntryById(item.id)}
+            t={t}
           />
           <KnowledgePager
             page={page}
             pageSize={filters.pageSize}
             onPage={(next) => model.updateFilters({ page: next })}
             onPageSize={(pageSize) => model.updateFilters({ pageSize, page: 0 })}
+            t={t}
           />
         </>
       )}

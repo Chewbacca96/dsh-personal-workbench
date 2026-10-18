@@ -70,6 +70,8 @@ ${panelContainerCss({ view: VIEW_ATTR, official: OFFICIAL_ATTR, active: ACTIVE_A
    （见 index.tsx 的 wb-pending-pill）。PENDING_ATTR 仍用于草稿浮卡的定位。 */
 .wb-app { height:100%; display:flex; flex-direction:column; }
 .wb-h { flex:none; display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.22)); background:var(--dsw-alias-bg-layer-1, rgba(255,255,255,.02)); }
+/* 英文标签比中文长：按钮/分段项一律不折行，否则顶栏会出现"两行字"的矮按钮（实测 en-US 截图）。 */
+.wb-h .wb-btn, .wb-h .wb-seg { white-space:nowrap; }
 .wb-title { display:flex; align-items:center; gap:8px; font-size:16px; font-weight:700; letter-spacing:.02em; white-space:nowrap; }
 .wb-title svg { width:19px; height:19px; color:var(--dsw-alias-state-business-primary, #8fa8c8); }
 .wb-segmented { display:inline-flex; padding:3px; border-radius:10px; background:var(--dsw-alias-bg-base, #111); border:1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.20)); }
@@ -163,7 +165,7 @@ ${panelContainerCss({ view: VIEW_ATTR, official: OFFICIAL_ATTR, active: ACTIVE_A
    命中的是对话框里的元素，表现为"点了没反应、值也不落进去"。这个 bug 是
    scripts/verify/suites/workspace-picker.mjs 的 elementFromPoint 诊断抓出来的。
    ⚠️ 本段在模板字符串里，**不能出现反引号**。 */
-.wb-modal-mask { position:fixed; inset:0; z-index:320; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; }
+.wb-modal-mask { position:fixed; inset:0; z-index:320; pointer-events:auto; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; }
 .wb-modal { width:min(520px, 92vw); background:var(--dsw-alias-bg-layer-2, #1c1c1f); border:1px solid var(--dsw-alias-border-l1, rgba(255,255,255,.25)); border-radius:14px; padding:18px; box-shadow:0 18px 50px rgba(0,0,0,.4); color:var(--dsw-alias-label-primary, #eee); font-family:var(--dsw-font-family, system-ui); }
 .wb-modal h4 { margin:0 0 8px; }
 .wb-modal p { margin:0 0 12px; font-size:12.5px; color:var(--dsw-alias-label-secondary); }
@@ -469,9 +471,9 @@ ${panelContainerCss({ view: VIEW_ATTR, official: OFFICIAL_ATTR, active: ACTIVE_A
    层叠：.wb-overlay 是 300，浮层要压住它；--wb-* 令牌由令牌层提供。
    ⚠️ 本段在模板字符串里，**不能出现反引号**。
    --------------------------------------------------------------------------- */
-.wb-model-menu { position: fixed; z-index: 330; box-sizing: border-box; width: 320px; max-height: min(60vh, 360px); overflow-y: auto; padding: 6px; border: 1px solid var(--wb-border, rgba(127,127,127,.22)); border-radius: 10px; background: var(--dsw-alias-bg-layer-2, #1c1c1f); box-shadow: 0 12px 32px rgba(0,0,0,.45); overscroll-behavior: contain; scrollbar-width: thin; }
+.wb-model-menu { position: fixed; z-index: 330; pointer-events: auto; box-sizing: border-box; width: 320px; max-height: min(60vh, 360px); overflow-y: auto; padding: 6px; border: 1px solid var(--wb-border, rgba(127,127,127,.22)); border-radius: 10px; background: var(--dsw-alias-bg-layer-2, #1c1c1f); box-shadow: 0 12px 32px rgba(0,0,0,.45); overscroll-behavior: contain; scrollbar-width: thin; }
 /* 浮层打开时的"点外面关掉"层：必须**在弹窗之上**（300）才能接住落在弹窗任意位置的第一次点击 */
-.wb-model-scrim { position: fixed; inset: 0; z-index: 329; }
+.wb-model-scrim { position: fixed; inset: 0; z-index: 329; pointer-events: auto; }
 .wb-model-group-title { padding: 4px 8px; font-size: 11px; font-weight: 700; color: var(--dsw-alias-label-secondary); }
 .wb-model-option { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 9px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
 .wb-model-option:hover { background: color-mix(in srgb, var(--dsw-alias-label-primary, #fff) 7%, transparent); }
@@ -509,9 +511,12 @@ ${panelContainerCss({ view: VIEW_ATTR, official: OFFICIAL_ATTR, active: ACTIVE_A
    签名元素 = 两栏悬浮工作台面板：左分区导航 / 右独立滚动 / 粘性底栏。
    ========================================================================== */
 /* 非模态浮卡：**不铺遮罩、不拦点击**（草稿弹框用它，避免"弹框一出什么都干不了"）。
-   容器本身 pointer-events:none，只有卡片本体接收事件 —— 点卡片外面照样能操作 DSH。 */
+   容器本身 pointer-events:none，只有卡片本体接收事件 —— 点卡片外面照样能操作 DSH。
+   z-index 305 = 高于设置弹窗（.wb-overlay 300），但低于嵌套浮层（.wb-modal-mask 320 /
+   .wb-model-scrim 329 / .wb-model-menu 330）。这样"生成完成"的草稿卡在设置页打开时
+   仍然看得见；实测同值 300 时它被后渲染的设置弹窗整个盖住。 */
 .wb-dock {
-  position: fixed; right: 18px; bottom: 18px; z-index: 300;
+  position: fixed; right: 18px; bottom: 18px; z-index: 305;
   pointer-events: none; display: flex; justify-content: flex-end;
 }
 .wb-dock > .wb-dialog {
@@ -523,6 +528,9 @@ ${panelContainerCss({ view: VIEW_ATTR, official: OFFICIAL_ATTR, active: ACTIVE_A
 }
 .wb-overlay {
   position: fixed; inset: 0; z-index: 300;
+  /* 宿主 overlay 层是 pointer-events:none 且该属性会继承；挂进去后必须自己重新开启，
+     否则就是 issue #14 作者说的"看得见点不动"。 */
+  pointer-events: auto;
   display: flex; align-items: center; justify-content: center; padding: 24px;
   background: rgba(0,0,0,.52);
   backdrop-filter: blur(2px);
@@ -693,6 +701,27 @@ ${panelContainerCss({ view: VIEW_ATTR, official: OFFICIAL_ATTR, active: ACTIVE_A
 .wb-draft-field { display: flex; gap: 8px; font-size: 12px; line-height: 1.7; margin: 2px 0; }
 .wb-draft-field-k { flex: none; min-width: 76px; color: var(--dsw-alias-label-secondary); }
 .wb-draft-field-v { flex: 1; min-width: 0; word-break: break-all; }
+/**
+ * 专家草稿预览（ExpertDraftBody）：它的字段是**成对的 label / value 直接排在根上**，
+ * 所以根必须是两列网格，不能复用 .wb-draft-field 的 flex 行。
+ *
+ * 实测缺陷（2026-10-18）：根误用了 .wb-draft-field，5 个字段变成 5 个并排的 flex 项，
+ * 每列被压到 0–76px、正文一字一行、横向溢出 615px；草稿弹窗里整块不可读。
+ */
+.wb-expert-draft { display:grid; grid-template-columns:76px minmax(0,1fr); column-gap:8px; align-items:start; font-size:12px; line-height:1.7; margin:2px 0; }
+.wb-expert-draft > .wb-draft-field-k { min-width:0; }
+.wb-expert-draft > .wb-draft-field-v { min-width:0; overflow-wrap:anywhere; }
+/* 说明 / 提示 / 按钮行不是一对字段：必须横跨两列，否则会被塞进左列。 */
+.wb-expert-draft > :not(.wb-draft-field-k):not(.wb-draft-field-v) { grid-column:1 / -1; }
+/**
+ * 专家预览里的说明文字。
+ *
+ * ⚠️ 不能复用 .wb-row-meta：那个类是任务行里的四列元数据网格
+ * （68/46/56/88px），套到长句子上会把正文塞进第一列 68px，
+ * 实测每行只剩 5–6 个字、整块看起来像竖排。这里只保留字号/颜色/换行。
+ */
+.wb-expert-note { display:block; font-size:11.5px; line-height:1.6; color:var(--dsw-alias-label-secondary); overflow-wrap:anywhere; }
+.wb-expert-draft .wb-row-title { white-space:normal; overflow:visible; text-overflow:clip; }
 /* 确认草稿时「本该创建但没创建」的告警条（绝不静默丢件的界面侧防线） */
 .wb-draft-problems {
   margin-top: 10px; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.7;

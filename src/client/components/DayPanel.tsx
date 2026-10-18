@@ -28,6 +28,7 @@ import type { DailyPlanView, Dict, Task, TaskReportView } from '../viewTypes.js'
 import { countTaskTreeBy, type TaskTreeNode } from '../taskFilterSort.js'
 import { localDateString, startOfWeek } from '../format.js'
 import { isDayPanelExtraTab, resolveDayPanelTab, type DayPanelTabCode } from '../../shared/dailyPlanPolicy.js'
+import { useI18n } from '../i18n.js'
 
 /** 面板的页签（**类型定义在共享层**：装配层与组件引用同一份，不许各写一份字面量联合）。 */
 export type DayTab = DayPanelTabCode
@@ -120,6 +121,7 @@ export function DayPanel(props: DayPanelProps): JSX.Element {
     onClearPlan, onSavePlan, report, emptyPlanAction,
     onScheduleToday, scheduledIds, schedulingTaskId,
   } = props
+  const { t } = useI18n()
 
   const reportAnchor = report.subTab === 'week' ? localDateString(startOfWeek(new Date(day))) : day
   const doneCount = countTaskTreeBy(doneTree, (task: Task) => task.completedAt !== null)
@@ -137,11 +139,11 @@ export function DayPanel(props: DayPanelProps): JSX.Element {
      * 「计划」页签的计数 = **真计划项**条数：分组行（父/祖先链）只作上下文，不计入
      *（ADR0010：父任务自己不是计划项）。
      */
-    { code: 'plan', label: '计划', icon: 'list', count: countMembers(planTree, planContextIds) },
-    { code: 'overdue', label: '逾期', icon: 'bell', count: countMembers(overdueTree, overdueContextIds) },
-    { code: 'unscheduled', label: '未排期', icon: 'calendar', count: countMembers(unscheduledTree, unscheduledContextIds) },
-    { code: 'done', label: '已完成', icon: 'check', count: doneCount },
-    { code: 'report', label: '报告', icon: 'report', count: 0 },
+    { code: 'plan', label: t('计划'), icon: 'list', count: countMembers(planTree, planContextIds) },
+    { code: 'overdue', label: t('逾期'), icon: 'bell', count: countMembers(overdueTree, overdueContextIds) },
+    { code: 'unscheduled', label: t('未排期'), icon: 'calendar', count: countMembers(unscheduledTree, unscheduledContextIds) },
+    { code: 'done', label: t('已完成'), icon: 'check', count: doneCount },
+    { code: 'report', label: t('报告'), icon: 'report', count: 0 },
   ]
   const visibleTabs = tabDefs.filter((def) => (isDayPanelExtraTab(def.code) ? extraTabsAvailable : true))
 
@@ -180,9 +182,9 @@ export function DayPanel(props: DayPanelProps): JSX.Element {
         <>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
             {readOnly
-              ? <span style={{ fontSize: 12, color: '#999' }}>过去日期只读；如需为今天/未来排期，请选择今天或之后的日期。</span>
-              : <button className="wb-btn primary" disabled={busy} onClick={onSort}><Icon name="sparkles" />{plan !== null ? (isToday ? '继续编辑今日计划' : `继续编辑该日计划`) : (isToday ? 'AI 智能排序' : `AI 智能排序（${day}）`)}</button>}
-            <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>AI 会先提交顺序提案，确认后才生效</span>
+              ? <span style={{ fontSize: 12, color: '#999' }}>{t('过去日期只读；如需为今天/未来排期，请选择今天或之后的日期。')}</span>
+              : <button className="wb-btn primary" disabled={busy} onClick={onSort}><Icon name="sparkles" />{plan !== null ? (isToday ? t('继续编辑今日计划') : t('继续编辑该日计划')) : (isToday ? t('AI 智能排序') : t('AI 智能排序（{day}）', { day }))}</button>}
+            <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>{t('AI 会先提交顺序提案，确认后才生效')}</span>
             {/* 候选被截断时必须当场说出来：不给"全量排序"的假印象（需求 §5.1） */}
             {promptInfo.truncated && <span style={{ fontSize: 12, color: '#d9a03f' }} role="status">{promptInfo.notice}</span>}
           </div>
@@ -190,7 +192,7 @@ export function DayPanel(props: DayPanelProps): JSX.Element {
             <PlanPanel
               plan={plan}
               tasks={tasks}
-              title={isToday ? `今日计划 · ${plan.planDate}` : `${plan.planDate} 计划`}
+              title={isToday ? t('今日计划 · {date}', { date: plan.planDate }) : t('{date} 计划', { date: plan.planDate })}
               canEdit={!readOnly}
               candidateTasks={candidateRows}
               canEndEffort={isToday}
@@ -241,7 +243,7 @@ export function DayPanel(props: DayPanelProps): JSX.Element {
             </>
           ) : (
             <div className="wb-empty" style={{ marginTop: 8 }}>
-              {report.subTab === 'week' ? '本周' : '当天'}还没有报告。
+              {t('{period}还没有报告。', { period: report.subTab === 'week' ? t('本周') : t('当天') })}
               <div style={{ marginTop: 10 }}>
                 <button className="wb-btn primary lg" disabled={busy} onClick={report.onGenerate}>
                   {report.sessionActive ? '继续编辑报告' : `AI 生成${report.subTab === 'week' ? '周报' : '日报'}（${reportAnchor}）`}
@@ -272,7 +274,7 @@ export function DayPanel(props: DayPanelProps): JSX.Element {
           />
           {roots.length === 0 && (
             <div className="wb-empty" style={{ padding: '24px 18px' }} data-day-empty={activeTab}>
-              {planEmptyNode(activeTab, day, emptyPlanAction)}
+              {planEmptyNode(activeTab, day, emptyPlanAction, t)}
             </div>
           )}
         </div>
@@ -286,13 +288,13 @@ export function DayPanel(props: DayPanelProps): JSX.Element {
  *
  * 「逾期」/「未排期」必须解释判据 —— 否则用户会以为"任务丢了"（这次需求就是这么来的）。
  */
-function planEmptyNode(tab: DayTab, day: string, emptyPlanAction: ReactNode): ReactNode {
+function planEmptyNode(tab: DayTab, day: string, emptyPlanAction: ReactNode, t: (key: string, params?: Record<string, string | number>) => string): ReactNode {
   if (tab === 'plan') {
     return emptyPlanAction !== undefined
       ? emptyPlanAction
       : (
         <>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>{day} 没有计划任务</div>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('{day} 没有计划任务', { day })}</div>
           <div style={{ fontSize: 12, opacity: .8, marginTop: 4 }}>切换到其他日期查看计划/记录</div>
         </>
       )
@@ -300,7 +302,7 @@ function planEmptyNode(tab: DayTab, day: string, emptyPlanAction: ReactNode): Re
   if (tab === 'overdue') {
     return (
       <>
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>没有逾期任务</div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('没有逾期任务')}</div>
         <div style={{ fontSize: 12, opacity: .8, marginTop: 4 }}>截止时间早于 {day} 的未完成任务会出现在这里（已完成 / 已取消 / 已归档不算）。</div>
       </>
     )
@@ -308,7 +310,7 @@ function planEmptyNode(tab: DayTab, day: string, emptyPlanAction: ReactNode): Re
   if (tab === 'unscheduled') {
     return (
       <>
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>没有未排期的任务</div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('没有未排期的任务')}</div>
         <div style={{ fontSize: 12, opacity: .8, marginTop: 4 }}>
           既没逾期、也没排进这一天、状态也不是进行中的未完成任务会出现在这里 —— 想安排它们请先给任务设截止时间，或把状态改成「进行中」。
         </div>
@@ -317,7 +319,7 @@ function planEmptyNode(tab: DayTab, day: string, emptyPlanAction: ReactNode): Re
   }
   return (
     <>
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>{day} 没有完成记录</div>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('{day} 没有完成记录', { day })}</div>
       <div style={{ fontSize: 12, opacity: .8, marginTop: 4 }}>切换到其他日期查看计划/记录</div>
     </>
   )

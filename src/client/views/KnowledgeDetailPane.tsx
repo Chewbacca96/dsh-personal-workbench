@@ -19,6 +19,7 @@ import { Icon } from '../components/Icon.js'
 import { MarkdownText } from '../components/MarkdownText.js'
 import type { Dict, Task } from '../viewTypes.js'
 import type { KnowledgeDictFn, UseKnowledgeResult } from '../hooks/useKnowledge.js'
+import { useI18n } from '../i18n.js'
 
 export interface KnowledgeDetailPaneProps {
   /** 知识域模型（草稿、编辑态与 `startEdit` / `closeDraft` / `openKnowledgeFile` 都在里面）。 */
@@ -33,6 +34,7 @@ export interface KnowledgeDetailPaneProps {
 }
 
 export function KnowledgeDetailPane(props: KnowledgeDetailPaneProps): JSX.Element {
+  const { t } = useI18n()
   const { model, tasks, dictOf, setError, setNotice, openTaskById } = props
   const { draft, selected } = model
 
@@ -45,17 +47,17 @@ export function KnowledgeDetailPane(props: KnowledgeDetailPaneProps): JSX.Elemen
         const isEdit = model.editId !== null
         const payload = { title: draft.title.trim(), contentMd: draft.contentMd, kindCode: draft.kindCode, tags, sourceTaskId: draft.sourceTaskId.trim() === '' ? null : draft.sourceTaskId.trim(), sourceReviewId: draft.sourceReviewId.trim() === '' ? null : draft.sourceReviewId.trim(), fileLink: draft.fileLink.trim() === '' ? null : draft.fileLink.trim() }
         void api(isEdit ? `/api/workbench/knowledge/${model.editId}` : '/api/workbench/knowledge', { method: isEdit ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
-          .then(() => { model.closeDraft(); model.bumpRefreshKey(); setNotice(isEdit ? '知识条目已更新' : '知识条目已创建') })
+          .then(() => { model.closeDraft(); model.bumpRefreshKey(); setNotice(isEdit ? t('知识条目已更新') : t('知识条目已创建')) })
           .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
       }}>
-        <h4 className="full" style={{ margin: 0 }}>{model.editId === null ? '新建知识条目' : '编辑知识条目'}</h4>
-        <label className="full">标题<input value={draft.title} onChange={(e) => model.patchDraft({ title: e.target.value })} placeholder="可检索的标题" /></label>
-        <label>分类<select value={draft.kindCode} onChange={(e) => model.patchDraft({ kindCode: e.target.value })}>{dictOf('knowledge_kind').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
-        <label>标签<input value={draft.tags} onChange={(e) => model.patchDraft({ tags: e.target.value })} placeholder="用逗号/空格分隔，如 TTS, 踩坑" /></label>
-        <label className="full">本地文件链接（可选）<input value={draft.fileLink} onChange={(e) => model.patchDraft({ fileLink: e.target.value })} placeholder="file:// 或绝对路径，如 D:\docs\方案.md、/mnt/d/docs/方案.md" /></label>
-        <label className="full">关联任务 id（可选）<input value={draft.sourceTaskId} onChange={(e) => model.patchDraft({ sourceTaskId: e.target.value })} placeholder="留空表示不关联" /></label>
-        <label className="full">正文（Markdown）<textarea rows={12} value={draft.contentMd} onChange={(e) => model.patchDraft({ contentMd: e.target.value })} /></label>
-        <div className="full" style={{ display: 'flex', gap: 8 }}><button className="wb-btn primary" type="submit"><Icon name="check" />保存</button><button className="wb-btn" type="button" onClick={model.closeDraft}>取消</button></div>
+        <h4 className="full" style={{ margin: 0 }}>{model.editId === null ? t('新建知识条目') : t('编辑知识条目')}</h4>
+        <label className="full">{t('标题')}<input value={draft.title} onChange={(e) => model.patchDraft({ title: e.target.value })} placeholder={t('可检索的标题')} /></label>
+        <label>{t('分类')}<select value={draft.kindCode} onChange={(e) => model.patchDraft({ kindCode: e.target.value })}>{dictOf('knowledge_kind').map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}</select></label>
+        <label>{t('标签')}<input value={draft.tags} onChange={(e) => model.patchDraft({ tags: e.target.value })} placeholder={t('用逗号/空格分隔，如 TTS, 踩坑')} /></label>
+        <label className="full">{t('本地文件链接（可选）')}<input value={draft.fileLink} onChange={(e) => model.patchDraft({ fileLink: e.target.value })} placeholder={t('file:// 或绝对路径，如 D:\\docs\\方案.md、/mnt/d/docs/方案.md')} /></label>
+        <label className="full">{t('关联任务 id（可选）')}<input value={draft.sourceTaskId} onChange={(e) => model.patchDraft({ sourceTaskId: e.target.value })} placeholder={t('留空表示不关联')} /></label>
+        <label className="full">{t('正文（Markdown）')}<textarea rows={12} value={draft.contentMd} onChange={(e) => model.patchDraft({ contentMd: e.target.value })} /></label>
+        <div className="full" style={{ display: 'flex', gap: 8 }}><button className="wb-btn primary" type="submit"><Icon name="check" />{t('保存')}</button><button className="wb-btn" type="button" onClick={model.closeDraft}>{t('取消')}</button></div>
       </form>
     )
   }
@@ -66,8 +68,8 @@ export function KnowledgeDetailPane(props: KnowledgeDetailPaneProps): JSX.Elemen
       <div className="wb-card">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <h4 style={{ flex: 1, margin: 0 }}>{selected.title}</h4>
-          <button className="wb-btn" onClick={() => model.startEdit(selected)}><Icon name="edit" />编辑</button>
-          <button className="wb-btn" onClick={() => { if (window.confirm('删除这条知识？')) { void api(`/api/workbench/knowledge/${selected.id}`, { method: 'DELETE' }).then(() => { model.setSelected(null); model.bumpRefreshKey(); setNotice('已删除') }).catch((err: unknown) => setError(err instanceof Error ? err.message : String(err))) } }}><Icon name="trash" />删除</button>
+          <button className="wb-btn" onClick={() => model.startEdit(selected)}><Icon name="edit" />{t('编辑')}</button>
+          <button className="wb-btn" onClick={() => { if (window.confirm(t('删除这条知识？'))) { void api(`/api/workbench/knowledge/${selected.id}`, { method: 'DELETE' }).then(() => { model.setSelected(null); model.bumpRefreshKey(); setNotice(t('已删除')) }).catch((err: unknown) => setError(err instanceof Error ? err.message : String(err))) } }}><Icon name="trash" />{t('删除')}</button>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '8px 0' }}>
           <Badge dict={dictOf('knowledge_kind')} code={selected.kindCode} />
@@ -75,14 +77,14 @@ export function KnowledgeDetailPane(props: KnowledgeDetailPaneProps): JSX.Elemen
         </div>
         {fileLink !== null && fileLink !== '' && (
           <div style={{ margin: '8px 0', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span>📎 本地文件：</span>
+            <span>{t('📎 本地文件：')}</span>
             <span className="wb-file-chip"><Icon name="file" size={12} /><code>{fileLink}</code></span>
-            <button className="wb-btn" onClick={() => { void model.openKnowledgeFile(fileLink) }}><Icon name="file" />打开文件</button>
+            <button className="wb-btn" onClick={() => { void model.openKnowledgeFile(fileLink) }}><Icon name="file" />{t('打开文件')}</button>
           </div>
         )}
         {selected.sourceTaskId !== null && (
           <div style={{ margin: '8px 0', fontSize: 13 }}>
-            🔗 关联任务：
+            {t('🔗 关联任务：')}
             <button className="wb-btn" onClick={() => openTaskById(selected.sourceTaskId as string)}>
               {tasks.find((t) => t.id === selected.sourceTaskId)?.title ?? selected.sourceTaskId}
             </button>
@@ -93,5 +95,5 @@ export function KnowledgeDetailPane(props: KnowledgeDetailPaneProps): JSX.Elemen
     )
   }
 
-  return <div className="wb-empty">← 从左侧选择或新建知识条目</div>
+  return <div className="wb-empty">{t('← 从左侧选择或新建知识条目')}</div>
 }

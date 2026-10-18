@@ -24,6 +24,7 @@
 - 🗓️ **每日计划 + 容量账本**：AI 排序提案 → 确认才生效；「今日投入结束」≠ 任务完成（ADR 0007）
 - 🎯 **会话前选 Skill / 模型 / 角色**，提示词自动注入「加载这些技能」
 - ⏰ **到期提醒**：页内横幅 + 系统通知；可选微信通道（需 `@xmanrui/dsh-im`）
+- 🌐 **界面语言**：自动 / 中文 / English（设置 → 语言）；顶栏、设置、角色库/专家、快速录入、任务表单、知识库与选择器已支持英文，深层说明文案增量迁移
 - 🔒 **数据只在本机** `~/.dsh/workbench`，不上传任何服务器
 
 ## 安装
@@ -93,6 +94,7 @@ pnpm build && pnpm dev:install   # 装盘到本机 profile（装完重启 dsh we
 
 | 版本 | 要点 |
 |---|---|
+| **1.17.0** | **角色库/专家 UI 可用性 + 英文界面（i18n）+ 宿主浮层挂载**：修掉专家草稿预览一字一行/横向溢出、设置页「继续修改」后弹窗不关、「查看草稿」被设置弹窗遮挡、界面露出 `**` 与角色来源标签重复；设置新增**语言**（自动/中文/English），顶栏、设置、角色库/专家、快速录入、任务表单与知识库等顶层界面支持英文，语言保存后重启仍保留；浮层改为优先挂宿主 `[data-shell-overlay]` 层并补 `pointer-events`，修复桌面端设置弹窗与模型列表被面板盖住（[issue #14](https://github.com/Dely0/dsh-personal-workbench/issues/14)）。英文界面见 [issue #12](https://github.com/Dely0/dsh-personal-workbench/issues/12)。详见 [`docs/releases/v1.17.0.md`](docs/releases/v1.17.0.md) |
 | **1.16.5** | **合入外部贡献：工作台样式节点丢失后的自愈**（[issue #9](https://github.com/Dely0/dsh-personal-workbench/issues/9) / [PR #10](https://github.com/Dely0/dsh-personal-workbench/pull/10)，[@SnowNight777](https://github.com/SnowNight777)）—— 插件活动期间 `style[data-dsh-personal-workbench-style]` 被删掉后约 **600ms** 内自动重建，关闭态面板不再"无样式弹出并覆盖界面"；观察者挂在**插件实例**上（不是模块级），`cleanup()` 先 `disposed = true` 再 `disconnect()`。同版修掉 **main 连续 33 次红的 CI**：`test/db.test.mjs` 那条"同链计划项"断言的**场景**从 2026-10-01 起就写错了、且 `finally` 里的清理异常会顶替断言失败（正是它被长期读成"Windows EPERM 假失败"的原因），CI run **#84** 双绿。详见 [`docs/releases/v1.16.5.md`](docs/releases/v1.16.5.md) |
 | **1.16.4** | **「排入今日」的父子口径定案**：计划项必须是**可执行叶子**，在**父任务**上点一次 = 按树序**展开它下面所有未完成叶子**（各自带自己的投入），父任务自己不是计划项、在「计划」页签作**分组行**（「已排 N / 共 M 个子任务 · 合计 X 分钟」）；候选池只收叶子、AI 侧口径同步「只排可执行叶子」（含父任务的提案整份被拒）。同版修掉「**清除今日计划不刷新**」与两处验收链套件假红。口径见 [`docs/adr/0010-plan-items-are-executable-leaves.md`](docs/adr/0010-plan-items-are-executable-leaves.md)，详见 [`docs/releases/v1.16.4.md`](docs/releases/v1.16.4.md) |
 | **1.16.3** | **客户端入口拆分**：`src/client/index.tsx` **5725 → 1972 行**、`WorkbenchApp` **4197 → 631 行**；117 个 state 按域收进 16 个 hook，五个视图与任务详情区各自成组件（`hooks/` + `views/` + `app/` 装配四段）；ADR-0008 结构硬门（体内 `useState`/`api`/`fetch`/定时器 = 0、单个顶层块 ≤80 行）落成扫描判据。**纯结构重构、零行为变化**。详见 [`docs/releases/v1.16.3.md`](docs/releases/v1.16.3.md) |
@@ -128,6 +130,8 @@ pnpm build && pnpm dev:install   # 装盘到本机 profile（装完重启 dsh we
   [#8](https://github.com/Dely0/dsh-personal-workbench/pull/8)）；**v1.16.5 的工作台样式自愈**同样来自其
   issue [#9](https://github.com/Dely0/dsh-personal-workbench/issues/9)（含故障注入最小复现与只读状态采集脚本）
   与 PR [#10](https://github.com/Dely0/dsh-personal-workbench/pull/10)（样式节点丢失后的自动恢复 + 生命周期清理 + 7 例回归）。
+- **[@Chewbacca96](https://github.com/Chewbacca96)** —— v1.17.0 的 UI localization（issue [#12](https://github.com/Dely0/dsh-personal-workbench/issues/12)）需求与边界定义。
+- **[@SnowNight777](https://github.com/SnowNight777)** —— v1.17.0 的宿主浮层挂载修复（issue [#14](https://github.com/Dely0/dsh-personal-workbench/issues/14)）提供了真实测量、`elementFromPoint` 证据与可直接落地的方案；此前 v1.15.3 / v1.16.5 的贡献见下。
 - [@tujunwenjie](https://github.com/tujunwenjie)、[@lhmhz](https://github.com/lhmhz) —— issue 诊断报告。
 - **内置角色库**含两个 MIT 上游（`novotnyllc/dotnet-artisan`、`K-Dense-AI/scientific-agents`）的领域角色，
   完整署名与「我们改了什么」见 [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md)。
@@ -159,6 +163,7 @@ turn DSH into a calendar + hierarchical task list + AI assistant workbench. All 
 - 🗓️ Daily plan + capacity ledger: AI proposes an order, only your confirmation applies it; "done for today" ≠ task completed
 - 🎯 Pick Skill / model / persona before each AI session; prompt gets a "load these skills" instruction
 - ⏰ Due reminders (in-panel banner + system notification), optional WeChat channel via `@xmanrui/dsh-im`
+- 🌐 **UI language**: auto / 中文 / English (Settings → Language); top-level chrome, settings, personas/experts, quick capture, task forms, knowledge view and pickers are translated, with deeper copy migrated incrementally
 - 🔒 Local-only storage at `~/.dsh/workbench`
 
 ## Install

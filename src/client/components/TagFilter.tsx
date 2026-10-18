@@ -15,7 +15,9 @@
  */
 import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { overlayMountContainer } from '../overlayMount.js'
 import type { TagCount } from '../listPresentation.js'
+import { useI18n } from '../i18n.js'
 
 /** 单行里最多常显几个标签（含"全部标签"入口之外的部分）。 */
 export const VISIBLE_TAG_LIMIT = 6
@@ -56,6 +58,7 @@ export function TagFilter({ tagCounts, selected, onChange, limit = VISIBLE_TAG_L
   onChange: (tags: string[]) => void
   limit?: number
 }): JSX.Element | null {
+  const { t } = useI18n()
   const [menuOpen, setMenuOpen] = useState(false)
   const [menuRect, setMenuRect] = useState<{ left: number; top: number } | null>(null)
   const [keyword, setKeyword] = useState('')
@@ -84,7 +87,7 @@ export function TagFilter({ tagCounts, selected, onChange, limit = VISIBLE_TAG_L
           className="wb-tagmenu-search"
           data-tagmenu-search
           type="search"
-          placeholder={`搜索 ${tagCounts.length} 个标签`}
+          placeholder={t('搜索 {n} 个标签', { n: tagCounts.length })}
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
           autoFocus
@@ -104,12 +107,12 @@ export function TagFilter({ tagCounts, selected, onChange, limit = VISIBLE_TAG_L
             <span className="wb-tagmenu-cnt">{option.count}</span>
           </button>
         ))}
-        {options.length === 0 && <div className="wb-tagmenu-empty">没有匹配的标签</div>}
+        {options.length === 0 && <div className="wb-tagmenu-empty">{t('没有匹配的标签')}</div>}
       </div>
       <div className="wb-tagmenu-foot">
-        <button type="button" className="wb-btn" data-tagmenu-clear disabled={selected.length === 0} onClick={() => onChange([])}>清空已选</button>
+        <button type="button" className="wb-btn" data-tagmenu-clear disabled={selected.length === 0} onClick={() => onChange([])}>{t('清空已选')}</button>
         <span style={{ flex: 1 }} />
-        <button type="button" className="wb-btn" data-tagmenu-close onClick={() => setMenuOpen(false)}>关闭</button>
+        <button type="button" className="wb-btn" data-tagmenu-close onClick={() => setMenuOpen(false)}>{t('关闭')}</button>
       </div>
     </div>
   ) : null
@@ -117,7 +120,7 @@ export function TagFilter({ tagCounts, selected, onChange, limit = VISIBLE_TAG_L
   return (
     <>
       <div className="wb-kb-tags" data-tagbar>
-        <button type="button" className={`wb-kb-tag ${selected.length === 0 ? 'on' : ''}`} data-kb-tag="" onClick={() => onChange([])}>全部标签</button>
+        <button type="button" className={`wb-kb-tag ${selected.length === 0 ? 'on' : ''}`} data-kb-tag="" onClick={() => onChange([])}>{t('全部标签')}</button>
         {shown.map((t) => (
           <button
             key={t.tag}
@@ -134,15 +137,15 @@ export function TagFilter({ tagCounts, selected, onChange, limit = VISIBLE_TAG_L
             type="button"
             className={`wb-kb-tag wb-kb-tag-more ${menuOpen ? 'on' : ''}`}
             data-tagmore
-            title={`还有 ${hiddenCount} 个标签没显示`}
+            title={t('还有 {n} 个标签没显示', { n: hiddenCount })}
             onClick={(e) => (menuOpen ? setMenuOpen(false) : openMenu(e.currentTarget))}
           >
-            更多 +{hiddenCount} ▾
+            {t('更多 +{n} ▾', { n: hiddenCount })}
           </button>
         )}
       </div>
-      {/* portal 到 body：工具栏在滚动容器里，浮层留在里面会被裁掉（与点子菜单同一套做法） */}
-      {menu !== null && (typeof document === 'undefined' ? menu : createPortal(menu, document.body))}
+      {/* portal 到宿主 overlay 层（拿不到时退回 body）：工具栏在滚动容器里，浮层留在里面会被裁掉（与点子菜单同一套做法） */}
+      {menu !== null && (typeof document === 'undefined' ? menu : createPortal(menu, overlayMountContainer()))}
     </>
   )
 }

@@ -161,7 +161,7 @@ function walkPersonaRoot(root: string, platform: string, sourceKey: PersonaSourc
     result.diagnostics.push({
       sourceKey,
       code: 'root-missing',
-      message: `来源根不可达，已**只禁用该来源**（其余来源照常）：${root}（${error instanceof Error ? error.message : String(error)}）`,
+      message: `来源根不可达，已只禁用该来源（其余来源照常）：${root}（${error instanceof Error ? error.message : String(error)}）`,
     })
     return result
   }
@@ -235,7 +235,7 @@ function walkPersonaRoot(root: string, platform: string, sourceKey: PersonaSourc
           sourceKey,
           code: 'document-limit',
           path: dir,
-          message: `角色文档数达到上限 ${PERSONA_MAX_DOCUMENTS}，**没有读完**该来源：${root}`,
+          message: `角色文档数达到上限 ${PERSONA_MAX_DOCUMENTS}，没有读完该来源：${root}`,
         })
         return
       }
@@ -305,7 +305,7 @@ function managedPublicationGate(
     id,
     path,
     code: 'installation-incomplete',
-    message: `角色「${id}」是工作台生成式新建的受管角色，但它的发布门还没就绪（${publication.reason}：${publication.message}）。按设计**跳过这个文档**：不在列表里出现、也不能被解析/绑定；请在「工作台 → 专家」里把这次安装确认完（或修复它）后再用。`,
+    message: `角色「${id}」是工作台生成式新建的受管角色，但它的发布门还没就绪（${publication.reason}：${publication.message}）。按设计跳过这个文档：不在列表里出现、也不能被解析/绑定；请在「工作台 → 专家」里把这次安装确认完（或修复它）后再用。`,
   }
 }
 
@@ -500,7 +500,7 @@ export function resolvePersona(
         sourceKey,
         id,
         code: 'root-missing',
-        message: `角色「${id}」的来源（${summary.source}）已不可达：${source.root}。已明确报错，**不切换到其他来源**。`,
+        message: `角色「${id}」的来源（${summary.source}）已不可达：${source.root}。已明确报错，不切换到其他来源。`,
       }],
     }
   }
@@ -527,7 +527,7 @@ export function resolvePersona(
         id,
         path: found,
         code: 'root-unreadable',
-        message: `角色「${id}」的文件内容已变化（revision ${read.revision.slice(0, 12)} ≠ 绑定时的 ${options.expectedRevision.slice(0, 12)}）。已**明确拒绝旧绑定**，请新建会话重新选择角色。`,
+        message: `角色「${id}」的文件内容已变化（revision ${read.revision.slice(0, 12)} ≠ 绑定时的 ${options.expectedRevision.slice(0, 12)}）。已明确拒绝旧绑定，请新建会话重新选择角色。`,
       }],
     }
   }

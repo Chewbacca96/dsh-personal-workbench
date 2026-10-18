@@ -61,6 +61,7 @@
     "src/client/components/TabBar.tsx",
     "src/client/components/TagFilter.tsx",
     "src/client/components/TaskList.tsx",
+    "src/client/overlayMount.ts",
     "src/client/components/LocalDocModal.tsx",
     "src/client/styles.ts",
     "src/client/workspacePath.ts",

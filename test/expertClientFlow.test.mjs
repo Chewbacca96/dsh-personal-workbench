@@ -788,6 +788,46 @@ test('AX-E56 坏文件行：显示名兜底、来源未登记可读、绝对路�
   assert.equal(EXPERT_STATUS_LABELS['installation-incomplete'].length > 0, true)
 })
 
+test('AX-E56 管理页来源行不重复、内置角色不显示"来源未登记"警告（列表可读性回归）', () => {
+  const builtin = expertRowView(makeRow())
+  assert.equal(builtin.sourceLabel, '内置')
+  assert.equal(builtin.sourceKeyLabel, '', '内置的来源键与来源是同一个词，不再重复显示')
+  assert.equal(builtin.provenanceLabel, '', '内置角色本来就没有上游来源，不当作"来源未登记"警告')
+  const manual = expertRowView(makeRow({ id: 'user/manual', source: 'user', sourceKey: 'manual' }))
+  assert.equal(manual.sourceKeyLabel, '', '用户库的 sourceKeyLabel 与 sourceLabel 相同，不重复')
+  assert.match(manual.provenanceLabel, /来源未登记/, '用户手工放进来的角色仍保留可追溯性提示')
+  const external = expertRowView(makeRow({ source: 'external', sourceKey: 'D:\\personas\\team' }))
+  assert.equal(external.sourceKeyLabel, '外部目录 · team', '外部目录仍显示末段目录名')
+})
+
+test('专家草稿预览是两列网格，根不再复用 .wb-draft-field（2026-10-18 横向挤成一字一行的回归）', () => {
+  const body = stripComments(read('src/client/components/ExpertDraftBody.tsx'))
+  assert.match(body, /className="wb-expert-draft"/)
+  assert.doesNotMatch(body, /className="wb-draft-field"/, '根不能再是 flex 行容器')
+  const styles = stripComments(read('src/client/styles.ts'))
+  assert.match(styles, /\.wb-expert-draft\s*\{[^}]*display:\s*grid/, '两列网格是布局的唯一来源')
+  assert.match(styles, /grid-template-columns:\s*76px minmax\(0,\s*1fr\)/)
+  assert.match(styles, /\.wb-expert-draft\s*>\s*:not\(\.wb-draft-field-k\):not\(\.wb-draft-field-v\)/, '说明/按钮行要横跨两列')
+})
+
+test('角色库/专家 UI 不把 Markdown 粗体标记直接渲染成星号（源码级）', () => {
+  const files = [
+    'src/client/components/PersonaAdmin.tsx',
+    'src/client/components/ExpertCreateModal.tsx',
+    'src/client/components/ExpertDraftBody.tsx',
+    'src/client/components/DraftBanner.tsx',
+    'src/client/components/CapacityRulePanel.tsx',
+    'src/client/components/SettingsModal.tsx',
+    'src/client/app/WorkbenchOverlays.tsx',
+  ]
+  const offenders = []
+  for (const file of files) {
+    const text = stripComments(read(file))
+    if (text.includes('**')) offenders.push(file)
+  }
+  assert.deepEqual(offenders, [], '纯文本 UI 里出现 ** 会原样显示成星号')
+})
+
 test('AX-E56 安装回执 reader：形状不对返回 null，不硬编类型', () => {
   assert.equal(readExpertInstalledFromOutcome({}), null)
   assert.equal(readExpertInstalledFromOutcome(null), null)
@@ -1021,10 +1061,10 @@ test('AX-E58 生成提示词是"短上下文 + 方法论全文 + 用户请求"�
 test('AX-E58 工作区匹配：精确优先、子目录次之、空 cwd 不猜', () => {
   const choices = [
     { workspaceId: 'ws-root', path: 'D:\\Code' },
-    { workspaceId: 'ws-sub', path: 'D:\\Code\\Linksight\\dsh-workbench' },
+    { workspaceId: 'ws-sub', path: 'D:\\Code\\<company>\\dsh-workbench' },
   ]
-  assert.equal(matchWorkspaceForCwd(choices, 'D:\\Code\\Linksight\\dsh-workbench'), 'ws-sub')
-  assert.equal(matchWorkspaceForCwd(choices, 'd:/code/linksight/dsh-workbench/src'), 'ws-sub', 'cwd 是工作区子目录时也算命中')
+  assert.equal(matchWorkspaceForCwd(choices, 'D:\\Code\\<company>\\dsh-workbench'), 'ws-sub')
+  assert.equal(matchWorkspaceForCwd(choices, 'd:/code/<company>/dsh-workbench/src'), 'ws-sub', 'cwd 是工作区子目录时也算命中')
   assert.equal(matchWorkspaceForCwd(choices, 'D:\\Code'), 'ws-root')
   assert.equal(matchWorkspaceForCwd(choices, ''), null, '拿不到 cwd 就要求用户手选')
   assert.equal(matchWorkspaceForCwd([{ workspaceId: '', path: 'D:\\Code' }], 'D:\\Code'), null)

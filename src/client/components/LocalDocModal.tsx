@@ -13,6 +13,7 @@
  * 现在盘符根给出 `ROOTS_PARENT` 哨兵 → 「上级」进「此电脑」视图 → 可以切到 `E:\`。
  */
 import { createPortal } from 'react-dom'
+import { overlayMountContainer } from '../overlayMount.js'
 import { Icon } from './Icon.js'
 import { ROOTS_PARENT } from '../localDirBrowser.js'
 
@@ -173,13 +174,13 @@ export function LocalDocModal({ open, path, listing, loading, error, busy, mode 
       </div>
     </div>,
     /**
-     * ⚠️ **必须 portal 到 `document.body`**（与 `components/Modal.tsx` 同一理由，且更强）：
+     * ⚠️ **必须 portal 到宿主 overlay 层（拿不到时退回 body）**（与 `components/Modal.tsx` 同一理由，且更强）：
      * 1. 插件渲染在 DSH 面板容器里，祖先可能带 `overflow` / `transform` —— 内联的 `position:fixed`
      *    会被裁剪或错位；
      * 2. 这个弹窗会被**从另一个弹窗里**打开（批次2 #2 的工作区「浏览…」来自快速录入 / 新建任务），
      *    那些对话框本身就 portal 到 body。内联在面板里的这一份 DOM 更靠内，连层级都排不上，
      *    于是被整块盖住 —— 表现为"点在按钮坐标上、命中的是对话框里的元素"。
      */
-    document.body,
+    overlayMountContainer(),
   )
 }

@@ -40,8 +40,8 @@
 
 **判据的证据源（两条，都跨进程）**：
 
-1. **会话 JSONL**：`C:\Users\Administrator\.dsh\sessions\<项目键>\<sessionId>\session.v<N>.jsonl.zstd`
-   - 项目键把工作区路径里的 `\`、`.`、`:` 换成 `-`（`D:\Code\Linksight\dsh-workbench` → `--D-Code-Linksight-dsh-workbench--`）。
+1. **会话 JSONL**：`C:\Users\<user>\.dsh\sessions\<项目键>\<sessionId>\session.v<N>.jsonl.zstd`
+   - 项目键把工作区路径里的 `\`、`.`、`:` 换成 `-`（`D:\Code\<company>\dsh-workbench` → `--D-Code-<company>-dsh-workbench--`）。
    - 关键事件：`session`（`id/cwd/parentSession/delegationDepth`）、`request/header`
      （**`data.header.tools[].name` 是全量工具清单**、`data.header.config` 是 provider/model）、
      `tool/call`（`data.name` + `data.arguments`）、`tool/result`、`user/message`、`assistant/message`。
@@ -177,7 +177,7 @@ AX-E61 的模型后半真正缺的是**调用预算**（它至少要 3 次真实
 
 | AX | 层 | 结论 | 证据 |
 |---|---|---|---|
-| **AX-E60** ⭐ | B | **pass（真跑）** | 真实浏览器点 UI 建出独立会话 `session-8c32e4b8-e9c6-4a41-ad1d-f5a792e143b9`（`cwd=D:\Code\Linksight\dsh-workbench`、`parentSession=null`、`delegationDepth=0`）→ 冷启动换会话后经真实 composer 发出逐字插件 prompt（4280 字符）→ 该会话 JSONL 实测 **53 事件 / 30 帧 / 0 解压失败 / 4 条 user/message**，模型 `deepseek-official/deepseek-flash`，工具调用按序 `workbench_get_expert_draft` → `workbench_search_knowledge` → `workbench_submit_expert_draft`×3 → `workbench_validate_expert_draft` → 目标库草稿行 `e7162d58-4af4-4c33-8729-3206d43876a9`：`session_id` 等于该会话、**`contentVersion=1`、`phase="validated"`**、`personaChars=676`、`provenanceKind="original"`、`validation.manifestHash=4aafced7e10578d7063813aad97ebfef3166407d999911c8daf7527ce16904cd`（errors[] / warnings[]）→ 确认前正式角色库 `C:\Users\Administrator\.dsh\workbench\personas` **不存在**（`rootExists:false`）。`verdict` 八项全 true：`independentSession/hasDraft/getCalled/submitCalled/validateCalled/versionAdvanced/phaseConsistent/libraryClean/allFiveOffered`。证据文件见 §5 的 `--evidence-dir`。 |
+| **AX-E60** ⭐ | B | **pass（真跑）** | 真实浏览器点 UI 建出独立会话 `session-8c32e4b8-e9c6-4a41-ad1d-f5a792e143b9`（`cwd=D:\Code\<company>\dsh-workbench`、`parentSession=null`、`delegationDepth=0`）→ 冷启动换会话后经真实 composer 发出逐字插件 prompt（4280 字符）→ 该会话 JSONL 实测 **53 事件 / 30 帧 / 0 解压失败 / 4 条 user/message**，模型 `deepseek-official/deepseek-flash`，工具调用按序 `workbench_get_expert_draft` → `workbench_search_knowledge` → `workbench_submit_expert_draft`×3 → `workbench_validate_expert_draft` → 目标库草稿行 `e7162d58-4af4-4c33-8729-3206d43876a9`：`session_id` 等于该会话、**`contentVersion=1`、`phase="validated"`**、`personaChars=676`、`provenanceKind="original"`、`validation.manifestHash=4aafced7e10578d7063813aad97ebfef3166407d999911c8daf7527ce16904cd`（errors[] / warnings[]）→ 确认前正式角色库 `C:\Users\<user>\.dsh\workbench\personas` **不存在**（`rootExists:false`）。`verdict` 八项全 true：`independentSession/hasDraft/getCalled/submitCalled/validateCalled/versionAdvanced/phaseConsistent/libraryClean/allFiveOffered`。证据文件见 §5 的 `--evidence-dir`。 |
 | **AX-E60-b** | B | **pass（真跑）** | 同一会话 `request/header` 实测交付 **57 个工具**，5 个专家生成工具逐个在位：`workbench_get_expert_draft` / `workbench_submit_expert_draft` / `workbench_stage_expert_file` / `workbench_remove_expert_staged_file` / `workbench_validate_expert_draft`（期望清单与实测清单逐字比对，缺一即红）。 |
 | **AX-E61-a** | B | **pass（真判）** | `GET /api/workbench/experts/catalog` → 200、**15 位可引用内置角色**（如 `domain/engineering/dotnet-代码审查官`），且页面 composer 在位（`composer.ok:true`）。 |
 | **AX-E61** ⭐ | B | **skip（预算）** | 端到端模型后半至少还要 3 次真实调用（父轮 + 子代理轮 + 复核父绑定轮），本批 6 次预算已用尽（明细见套件 `modelCalls` 与 §5 台账）。**通道前置已单独记 pass**（见上一行）；"任何路径都不写父绑定"的静态面（`src/experts/invocation.ts:14-15`）与 `manual-requests` 只建请求不写绑定已在 H 层单独记 pass。 |
@@ -204,13 +204,13 @@ AX-E61 的模型后半真正缺的是**调用预算**（它至少要 3 次真实
 
 ## 5. 命令与退出码
 
-全部在本机实测，工作目录 `D:\Code\Linksight\dsh-workbench`，`$env:DSH_VERIFY_TOKEN='8rG9rE68…'`（3080 实例的 cookie token）。
+全部在本机实测，工作目录 `D:\Code\<company>\dsh-workbench`，`$env:DSH_VERIFY_TOKEN='8rG9rE68…'`（3080 实例的 cookie token）。
 
 | # | 命令 | 退出码 | 结果 |
 |---|---|---|---|
 | 1 | `node --check scripts/verify/suites/expert.mjs` | **0** | 语法通过（改一次跑一次） |
 | 2 | `node scripts/check-verify-scripts.mjs` | **0** | 现役 11 / 待迁移 0 / 作废 3，`expert` 在册 |
-| 3 | `node scripts/verify/suites/expert.mjs --url http://127.0.0.1:3080 --db-path 'C:\Users\Administrator\.dsh\workbench\verify-web.db' --target-profile-dir 'C:\Users\Administrator\.dsh\profiles\web'`（最终一次 = run 14） | **0** | `{"passed":33,"failed":0,"skipped":2,"total":35}`；skip 只剩 `AX-E61` / `AX-E62` |
+| 3 | `node scripts/verify/suites/expert.mjs --url http://127.0.0.1:3080 --db-path 'C:\Users\<user>\.dsh\workbench\verify-web.db' --target-profile-dir 'C:\Users\<user>\.dsh\profiles\web'`（最终一次 = run 14） | **0** | `{"passed":33,"failed":0,"skipped":2,"total":35}`；skip 只剩 `AX-E61` / `AX-E62` |
 | 4 | `pnpm test` | **0** | `tests 1289 / pass 1289 / fail 0 / skipped 0`，`duration_ms ≈ 11998`（含 `pnpm build`：buildId `wb-8181274a3900fe0b`） |
 | 5 | `git diff --numstat -- scripts/verify/suites/expert.mjs` | 0 | `1054 114`（+1054 / −114），**CR bytes = 0**，不是整文件翻倍 |
 | 6 | 真实链 `node scripts/dev-verify.mjs …`（去掉 `--dry-run`） | **未跑** | 见 §6「未验证项」：它要先 `dev-install` 冻结点盘副本 + `restartTarget` 重启 3080，而本轮已经用「单跑套件 + 已冻结装盘副本」拿到了 AX-E60 的真证据；本批不重启、不重装 |

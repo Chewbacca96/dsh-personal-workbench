@@ -21,7 +21,7 @@
 | `git rev-parse HEAD` | 0 | `50d85b9aeffee3a23929e32ddb44567a82e89e61` |
 | `pnpm typecheck` | 0 | 基线干净（node v24.19.0 / pnpm 11.7.0） |
 
-## 实际核对到的契约（基目录 `C:/Users/Administrator/.dsh/profiles/node_modules/@deepseek-ai`，SDK `0.2.0-rc.2`）
+## 实际核对到的契约（基目录 `C:/Users/<user>/.dsh/profiles/node_modules/@deepseek-ai`，SDK `0.2.0-rc.2`）
 
 | 契约 | 符号 | 存在 |
 |---|---|---|

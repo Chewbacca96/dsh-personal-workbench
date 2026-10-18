@@ -20,6 +20,8 @@ const SETTINGS_FALLBACK = {
    * 那正好是"用户关掉了自动召唤、界面却显示开着"的事故形态。
    */
   autoSummonExperts: false,
+  /** 界面语言缺省 auto（旧服务端不返回这个键时跟随浏览器）。 */
+  uiLocale: 'auto',
 } as const
 
 /**
@@ -40,5 +42,6 @@ export function withSettingsFallback(settings: WorkbenchSettings): WorkbenchSett
     defaultEstimateMinutes: settings.defaultEstimateMinutes ?? SETTINGS_FALLBACK.defaultEstimateMinutes,
     dailyCapacityIncludeOverdue: settings.dailyCapacityIncludeOverdue ?? SETTINGS_FALLBACK.dailyCapacityIncludeOverdue,
     autoSummonExperts: settings.autoSummonExperts ?? SETTINGS_FALLBACK.autoSummonExperts,
+    uiLocale: settings.uiLocale ?? SETTINGS_FALLBACK.uiLocale,
   }
 }

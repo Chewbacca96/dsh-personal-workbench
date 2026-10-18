@@ -27,6 +27,7 @@
  */
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { overlayMountContainer } from '../overlayMount.js'
 import type { ContentItem } from '../listPresentation.js'
 import { placePopover, type PopoverPlacement } from '../popoverPlacement.js'
 import { fmtTime } from '../format.js'
@@ -188,9 +189,9 @@ export function IdeaCardGrid({ ideas, dicts, selectedId, pickedIds, clusters, on
           )
         })}
       </div>
-      {/* portal 到 body：网格/卡片/面板的 overflow 与层叠都管不到它。
+      {/* portal 到宿主 overlay 层（拿不到时退回 body）：网格/卡片/面板的 overflow 与层叠都管不到它。
           SSR（`renderToStaticMarkup`）里没有 document，退回原位渲染即可。 */}
-      {menu !== null && (typeof document === 'undefined' ? menu : createPortal(menu, document.body))}
+      {menu !== null && (typeof document === 'undefined' ? menu : createPortal(menu, overlayMountContainer()))}
     </>
   )
 }

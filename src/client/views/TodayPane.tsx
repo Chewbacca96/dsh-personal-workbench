@@ -17,6 +17,7 @@ import { DayPanel, type DayPanelProps } from '../components/DayPanel.js'
 import { Icon } from '../components/Icon.js'
 import type { CapacityLedger } from '../capacity.js'
 import type { Bootstrap } from '../viewTypes.js'
+import { useI18n } from '../i18n.js'
 
 export type TodayPaneProps = {
   /** 今日统计（`bootstrap.stats`；首屏未加载时为 `undefined`，渲染 0）。 */
@@ -46,6 +47,7 @@ export type TodayPaneProps = {
 }
 
 export function TodayPane(props: TodayPaneProps): JSX.Element {
+  const { t } = useI18n()
   const {
     stats, capacity, capacityEdit, dailyCapacityMinutes, defaultEstimateMinutes, includeOverdue,
     capacityExpanded, onCapacityEditStart, onCapacityEditChange, onCapacityEditCommit, onCapacityEditCancel,
@@ -56,10 +58,10 @@ export function TodayPane(props: TodayPaneProps): JSX.Element {
   return (
     <>
       <div className="wb-stats wb-stats-sticky">
-        <div className="wb-stat"><b>{stats?.overdue ?? 0}</b><span>逾期</span></div>
-        <div className="wb-stat"><b>{stats?.todayDue ?? 0}</b><span>今天到期</span></div>
-        <div className="wb-stat"><b>{stats?.doing ?? 0}</b><span>进行中</span></div>
-        <div className="wb-stat"><b>{stats?.total ?? 0}</b><span>总数</span></div>
+        <div className="wb-stat"><b>{stats?.overdue ?? 0}</b><span>{t('逾期')}</span></div>
+        <div className="wb-stat"><b>{stats?.todayDue ?? 0}</b><span>{t('今天到期')}</span></div>
+        <div className="wb-stat"><b>{stats?.doing ?? 0}</b><span>{t('进行中')}</span></div>
+        <div className="wb-stat"><b>{stats?.total ?? 0}</b><span>{t('总数')}</span></div>
       </div>
 
       {/*
@@ -69,14 +71,14 @@ export function TodayPane(props: TodayPaneProps): JSX.Element {
       */}
       <div className="wb-cap">
         <div className="wb-cap-head">
-          <h3>今日容量</h3>
+          <h3>{t('今日容量')}</h3>
           <div className="wb-cap-meta">
-            <span>已排 <b>{capacity.planned}</b> min</span>
+            <span>{t('已排')} <b>{capacity.planned}</b> min</span>
             <span>
-              可投入{' '}
+              {t('可投入')}{' '}
               <b>
                 {capacityEdit === null
-                  ? <span className="wb-cap-edit" title="点击修改每天可投入时长" onClick={onCapacityEditStart}>{dailyCapacityMinutes}</span>
+                  ? <span className="wb-cap-edit" title={t('点击修改每天可投入时长')} onClick={onCapacityEditStart}>{dailyCapacityMinutes}</span>
                   : <input
                       autoFocus
                       type="number"
@@ -92,14 +94,14 @@ export function TodayPane(props: TodayPaneProps): JSX.Element {
               </b>{' '}
               min
             </span>
-            <span>余 <b>{capacity.free}</b> min</span>
+            <span>{t('余')} <b>{capacity.free}</b> min</span>
           </div>
         </div>
         <div className="wb-cap-bar" role="img" aria-label={capacityAriaLabel(capacity)}>
           {(['p0', 'p1', 'p2', 'p3'] as const).map((code) => capacity.byPriority[code] > 0
             ? <i key={code} className={code} style={{ width: `${(capacity.byPriority[code] / capacity.total) * 100}%` }} title={`${code} · ${capacity.byPriority[code]} min`} />
             : null)}
-          {capacity.free > 0 && <i className="free" style={{ width: `${(capacity.free / capacity.total) * 100}%` }} title={`空闲 · ${capacity.free} min`} />}
+          {capacity.free > 0 && <i className="free" style={{ width: `${(capacity.free / capacity.total) * 100}%` }} title={`${t('空闲')} · ${capacity.free} min`} />}
         </div>
         {/**
           * 容量图例 + 「规则」按钮**同一行**（2026-10-01 用户要求）。
@@ -111,11 +113,11 @@ export function TodayPane(props: TodayPaneProps): JSX.Element {
           * 按钮位置也跟着跳（用户原话："打开、收起规则 的按钮还不在同一个位置"）。
           */}
         <div className="wb-cap-legend" data-cap-expanded={capacityExpanded ? '1' : '0'}>
-          <span className="wb-cap-legend-item"><i style={{ background: 'var(--wb-p0)' }} />紧急 <b>{capacity.byPriority.p0}</b></span>
-          <span className="wb-cap-legend-item"><i style={{ background: 'var(--wb-p1)' }} />高 <b>{capacity.byPriority.p1}</b></span>
-          <span className="wb-cap-legend-item"><i style={{ background: 'var(--wb-p2)' }} />普通 <b>{capacity.byPriority.p2}</b></span>
-          <span className="wb-cap-legend-item"><i style={{ background: 'var(--wb-p3)' }} />低 <b>{capacity.byPriority.p3}</b></span>
-          <span className="wb-cap-legend-item"><i style={{ background: 'color-mix(in srgb, var(--wb-ok) 36%, transparent)' }} />空闲 <b>{capacity.free}</b></span>
+          <span className="wb-cap-legend-item"><i style={{ background: 'var(--wb-p0)' }} />{t('紧急')} <b>{capacity.byPriority.p0}</b></span>
+          <span className="wb-cap-legend-item"><i style={{ background: 'var(--wb-p1)' }} />{t('高')} <b>{capacity.byPriority.p1}</b></span>
+          <span className="wb-cap-legend-item"><i style={{ background: 'var(--wb-p2)' }} />{t('普通')} <b>{capacity.byPriority.p2}</b></span>
+          <span className="wb-cap-legend-item"><i style={{ background: 'var(--wb-p3)' }} />{t('低')} <b>{capacity.byPriority.p3}</b></span>
+          <span className="wb-cap-legend-item"><i style={{ background: 'color-mix(in srgb, var(--wb-ok) 36%, transparent)' }} />{t('空闲')} <b>{capacity.free}</b></span>
           <CapacityRulePanel
             capacity={capacity}
             dailyCapacityMinutes={dailyCapacityMinutes}
@@ -139,11 +141,11 @@ export function TodayPane(props: TodayPaneProps): JSX.Element {
         emptyPlanAction={(
           <div className="wb-empty" style={{ padding: '28px 18px' }}>
             <div style={{ marginBottom: 6, color: 'var(--dsw-alias-state-business-primary, #4f8ef7)' }}><Icon name="today" size={30} /></div>
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>今天没有需要关注的任务</div>
-            <div style={{ fontSize: 12, opacity: .8, marginBottom: 12 }}>可以快速录入一个新任务，或新建一个待办</div>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('今天没有需要关注的任务')}</div>
+            <div style={{ fontSize: 12, opacity: .8, marginBottom: 12 }}>{t('可以快速录入一个新任务，或新建一个待办')}</div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <button className="wb-btn primary" onClick={onQuickEntry}>快速录入</button>
-              <button className="wb-btn" onClick={onNewTask}>新建任务</button>
+              <button className="wb-btn primary" onClick={onQuickEntry}>{t('快速录入')}</button>
+              <button className="wb-btn" onClick={onNewTask}>{t('新建任务')}</button>
             </div>
           </div>
         )}

@@ -20,8 +20,10 @@ import { draftKindLabel, fmtTime } from '../format.js'
 import { MAX_QUICK_DOCUMENTS, MAX_QUICK_IMAGES, isQuickImageDraft } from '../quickAttachments.js'
 import { quickWorkspaceSourceLabel, shouldRememberQuickWorkspace } from '../quickWorkspaceDefault.js'
 import { TaskCreateModal, TaskEditModal } from '../views/TaskFormModal.js'
+import { useI18n } from '../i18n.js'
 
 export function WorkbenchDialogs(props: WorkbenchAssembly): JSX.Element {
+  const { t } = useI18n()
   const { modelModalityTable, quickModelSelection, quickPersona, selectedSkills, skillCatalog, skillProblem, skillsAvailable, skillsLoading } = props.ai
   const { loadSkills, setModelModalityTable, setQuickModelSelection, setQuickPersona, startAISession, toggleSkill } = props.ai.actions
   const { busy } = props.busyApi
@@ -44,13 +46,13 @@ export function WorkbenchDialogs(props: WorkbenchAssembly): JSX.Element {
     <>
       {showQuick && (
         <Modal
-          title={<><Icon name="sparkles" />快速录入</>}
+          title={<><Icon name="sparkles" />{t('快速录入')}</>}
           size="md"
           onClose={closeIntake}
           footer={(
             <>
-              <span className="wb-foot-note">会跳转到官方会话区，由 AI 澄清后生成任务草稿</span>
-              <button className="wb-btn" onClick={cancelIntake}>取消</button>
+              <span className="wb-foot-note">{t('会跳转到官方会话区，由 AI 澄清后生成任务草稿')}</span>
+              <button className="wb-btn" onClick={cancelIntake}>{t('取消')}</button>
               <button
                 className="wb-btn primary"
                 disabled={busy || (quickText.trim() === '' && quickAttachments.length === 0)}
@@ -76,13 +78,13 @@ export function WorkbenchDialogs(props: WorkbenchAssembly): JSX.Element {
                   })
                 }}
               >
-                创建澄清会话
+                {t('创建澄清会话')}
               </button>
             </>
           )}
         >
           <label className="wb-field">
-            <span>一句话描述任务</span>
+            <span>{t('一句话描述任务')}</span>
             <textarea
               autoFocus
               rows={3}
@@ -95,7 +97,7 @@ export function WorkbenchDialogs(props: WorkbenchAssembly): JSX.Element {
                   addQuickAttachments(files)
                 }
               }}
-              placeholder="一句话描述任务，例如：周五 10:30 接待重要客户；也可以粘贴或拖入图片、PDF、DOCX"
+              placeholder={t('一句话描述任务，例如：周五 10:30 接待重要客户；也可以粘贴或拖入图片、PDF、DOCX')}
             />
           </label>
 
@@ -113,22 +115,22 @@ export function WorkbenchDialogs(props: WorkbenchAssembly): JSX.Element {
             }}
           >
             <span>
-              附件
+              {t('附件')}
               <span className="wb-field-note">
-                图片最多 {MAX_QUICK_IMAGES} 张 · PDF/DOCX 最多 {MAX_QUICK_DOCUMENTS} 份 · 单份 ≤ 5MB
+                {t('图片最多 {images} 张 · PDF/DOCX 最多 {documents} 份 · 单份 ≤ 5MB', { images: MAX_QUICK_IMAGES, documents: MAX_QUICK_DOCUMENTS })}
               </span>
             </span>
             {quickAttachments.length > 0 && (
-              <div className="wb-quick-attach-rail" aria-label="快速录入附件">
+              <div className="wb-quick-attach-rail" aria-label={t('快速录入附件')}>
                 {quickAttachments.map((item) => (
-                  <div className="wb-quick-attach-item" key={item.id} title={isQuickImageDraft(item) ? (item.file.name || '图片') : item.name}>
+                  <div className="wb-quick-attach-item" key={item.id} title={isQuickImageDraft(item) ? (item.file.name || t('图片')) : item.name}>
                     {isQuickImageDraft(item)
-                      ? <img src={item.previewUrl} alt={item.file.name || '图片'} />
+                      ? <img src={item.previewUrl} alt={item.file.name || t('图片')} />
                       : <Icon name="file" size={18} />}
                     <span className="wb-quick-attach-name">
-                      {isQuickImageDraft(item) ? (item.file.name || '图片') : `${item.name}${item.truncated ? '（已截断）' : ''}`}
+                      {isQuickImageDraft(item) ? (item.file.name || t('图片')) : `${item.name}${item.truncated ? t('（已截断）') : ''}`}
                     </span>
-                    <button type="button" className="wb-quick-attach-remove" onClick={() => removeQuickAttachment(item.id)} aria-label="移除附件">×</button>
+                    <button type="button" className="wb-quick-attach-remove" onClick={() => removeQuickAttachment(item.id)} aria-label={t('移除附件')}>×</button>
                   </div>
                 ))}
               </div>
@@ -147,7 +149,7 @@ export function WorkbenchDialogs(props: WorkbenchAssembly): JSX.Element {
                 }}
               />
               <button type="button" className="wb-btn" disabled={busy} onClick={() => quickImageInputRef.current?.click()}>
-                <Icon name="image" />添加附件
+                <Icon name="image" />{t('添加附件')}
               </button>
               <ModelPicker
                 runtime={runtime}
@@ -203,7 +205,7 @@ export function WorkbenchDialogs(props: WorkbenchAssembly): JSX.Element {
                 checked={quickFollowFolder}
                 onChange={(e) => setQuickFollowFolder(e.target.checked)}
               />
-              <span>在该工作区下建任务资料夹（`&lt;任务ID&gt;-&lt;标题片段&gt;`；不勾 = 直接用它本身）</span>
+              <span>{t('在该工作区下建任务资料夹（<任务ID>-<标题片段>；不勾 = 直接用它本身）')}</span>
             </label>
           )}
           {/**

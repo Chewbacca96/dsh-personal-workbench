@@ -22,6 +22,7 @@ import { fmtTime } from '../format.js'
 import type { DraftConfirmProblemView, DraftView } from '../../shared/contracts.js'
 import type { ExpertInstallResult } from '../../shared/expert.js'
 import { ExpertDraftBody } from './ExpertDraftBody.js'
+import { useI18n } from '../i18n.js'
 import {
   expertDraftButtons,
   isExpertDraft,
@@ -302,6 +303,7 @@ export function reviewMemoryNotes(payload: Record<string, unknown>): string[] {
 }
 
 export function DraftBanner({ draft, onDone, runtime, closePanel, kindName, onProblems, onNotice, isSessionUsable, onDismissed, onClose, onConfirmed, onSettled, switchedFrom, memoryAvailable = false, expertActions }: DraftBannerProps): ReactNode {
+  const { t } = useI18n()
   const [busy, setBusy] = useState(false)
   /**
    * 复盘的团队记忆可见性（v1.14.0：复盘确认时自动写入团队记忆库）。
@@ -448,7 +450,7 @@ export function DraftBanner({ draft, onDone, runtime, closePanel, kindName, onPr
         setExpertDraft(outcome.refreshed)
         setExpertError({
           code: outcome.code ?? 'version-conflict',
-          message: `${outcome.message ?? '这份内容已经变了。'}预览已刷新成最新版本；**没有**替你自动确认，请核对后重新校验再确认。`,
+          message: `${outcome.message ?? '这份内容已经变了。'}预览已刷新成最新版本；没有替你自动确认，请核对后重新校验再确认。`,
         })
         return
       }
@@ -529,7 +531,7 @@ export function DraftBanner({ draft, onDone, runtime, closePanel, kindName, onPr
 
   return (
     <Modal
-      title={presentation.title}
+      title={typeof presentation.title === 'string' ? t(presentation.title) : presentation.title}
       size="md"
       onClose={() => { onDismissed?.(); (onClose ?? onDone)() }}
       /**
@@ -553,7 +555,7 @@ export function DraftBanner({ draft, onDone, runtime, closePanel, kindName, onPr
             <>
               {canDefer && (
                 <button className="wb-btn" disabled={busy} title={presentation.deferHint ?? DEFER_HINT} onClick={() => void act(`/api/workbench/drafts/${draft.id}/defer`, deferBody)}>
-                  {presentation.deferLabel ?? DEFER_LABEL}
+                  {t(presentation.deferLabel ?? DEFER_LABEL)}
                 </button>
               )}
               <button
@@ -562,7 +564,7 @@ export function DraftBanner({ draft, onDone, runtime, closePanel, kindName, onPr
                 title={expertVersion === null ? '读不出这一版的版本号，先别放弃' : `放弃 v${expertVersion}`}
                 onClick={() => void act(`/api/workbench/drafts/${draft.id}/abandon`, { expectedVersion: expertVersion })}
               >
-                {presentation.abandonLabel}
+                {t(presentation.abandonLabel)}
               </button>
             </>
           ) : (
@@ -575,18 +577,18 @@ export function DraftBanner({ draft, onDone, runtime, closePanel, kindName, onPr
                   draft.kindCode === 'review' ? { memoryScope, memoryEnabled } : undefined,
                 )}
               >
-                {presentation.confirmLabel}
+                {t(presentation.confirmLabel)}
               </button>
               {canDefer && (
                 <button className="wb-btn" disabled={busy} title={presentation.deferHint ?? DEFER_HINT} onClick={() => void act(`/api/workbench/drafts/${draft.id}/defer`, deferBody)}>
-                  {presentation.deferLabel ?? DEFER_LABEL}
+                  {t(presentation.deferLabel ?? DEFER_LABEL)}
                 </button>
               )}
               <button className="wb-btn" disabled={busy} onClick={() => void act(`/api/workbench/drafts/${draft.id}/abandon`)}>
-                {presentation.abandonLabel}
+                {t(presentation.abandonLabel)}
               </button>
               {presentation.sessionLabel !== null && presentation.sessionId !== '' && (
-                <button className="wb-btn" onClick={openSession}>{presentation.sessionLabel}</button>
+                <button className="wb-btn" onClick={openSession}>{t(presentation.sessionLabel)}</button>
               )}
             </>
           )}
@@ -644,7 +646,9 @@ export function DraftBanner({ draft, onDone, runtime, closePanel, kindName, onPr
           />
         )}
         {presentation.note !== undefined && (
-          <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)', marginTop: 8 }}>{presentation.note}</div>
+          <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)', marginTop: 8 }}>
+            {typeof presentation.note === 'string' ? t(presentation.note) : presentation.note}
+          </div>
         )}
       </div>
     </Modal>
@@ -673,7 +677,7 @@ function describeDraft(draft: DraftView, kindName: (kind: string, code: string) 
       sessionLabel: null,
       sessionId: typeof draft.sessionId === 'string' ? draft.sessionId : '',
       canDefer: true,
-      note: '内置/外部角色只读；新建专家仅在**你确认后**写入用户库。确认按钮会带上你看到的版本与清单哈希。',
+      note: '内置/外部角色只读；新建专家仅在你确认后写入用户库。确认按钮会带上你看到的版本与清单哈希。',
     }
   }
   const payload = draft.payload

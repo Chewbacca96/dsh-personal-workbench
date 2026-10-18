@@ -87,7 +87,7 @@
 | 4 | `pnpm test` | **0** | `pnpm build && node --test test/*.test.mjs` ⇒ `tests 1289 / pass 1289 / fail 0 / skipped 0`（与 rebase 后基线一致，**新增失败 0**） |
 | 5 | `node scripts/verify/suites/expert.mjs …`（单跑） | **0** | `{"passed":29,"failed":0,"skipped":3,"total":32}` |
 | 6 | `node scripts/verify/suites/legacy-acceptance.mjs …`（单跑复核） | **0** | `18/18`（用于定性链里那次抖动，见 §11-2） |
-| 7 | `node scripts/dev-verify.mjs …`（**真实链，去 `--dry-run`**） | 见 §5 | 实参逐字：`--url http://127.0.0.1:3080 --profile web --profile-dir 'C:\Users\Administrator\.dsh\profiles\web' --db-path 'C:\Users\Administrator\.dsh\workbench\verify-web.db'` |
+| 7 | `node scripts/dev-verify.mjs …`（**真实链，去 `--dry-run`**） | 见 §5 | 实参逐字：`--url http://127.0.0.1:3080 --profile web --profile-dir 'C:\Users\<user>\.dsh\profiles\web' --db-path 'C:\Users\<user>\.dsh\workbench\verify-web.db'` |
 
 `pnpm test` 的逐字计数：`tests 1289 / suites 0 / pass 1289 / fail 0 / cancelled 0 / skipped 0 / todo 0 / duration_ms 12111.87`。
 
@@ -113,7 +113,7 @@
 
 ### 5.2 最终一次链（第 6 次）：**11 个套件全部跑到**，`expert` 29/0/3
 
-`node scripts/dev-verify.mjs --url http://127.0.0.1:3080 --profile web --profile-dir 'C:\Users\Administrator\.dsh\profiles\web' --db-path 'C:\Users\Administrator\.dsh\workbench\verify-web.db'`
+`node scripts/dev-verify.mjs --url http://127.0.0.1:3080 --profile web --profile-dir 'C:\Users\<user>\.dsh\profiles\web' --db-path 'C:\Users\<user>\.dsh\workbench\verify-web.db'`
 （**去掉 `--dry-run`**，实参与 §4 第 7 行逐字相同）
 
 - **退出码 1**，证据包 `test-results/workbench-verify/20261005-212614-a85655/`（195798ms，另有 11 份 `suite-*.json` + 11 个同名证据目录）。
@@ -277,7 +277,7 @@
 2. **diff 审读**：`suites.json` = 仅 `+14 −0`（`active` + `required:true` + `axIds` AX-E59–E62）；`progress.mjs` = `+53 −1`，被删的**只有 1 行**（`report.after25 = { api: …, dom: … }` 换成更宽的诊断对象），新增行里**没有任何** `passed/failed/skipped/total/assert/exitCode` 相关改动 ⇒「只加诊断、判定与阈值未改」属实。
 3. **命令复跑**：`node scripts/check-verify-scripts.mjs` = **0**（现役 11 / 待迁移 0 / 作废 3）；`pnpm test` = **tests 1289 / pass 1289 / fail 0**、退出码 **0**。
 4. **套件独立复跑**：取 `%TEMP%\dsh-server-3080.log` 里**最后一个** `token=` 自己登录，`--db-path` / `--target-profile-dir` 齐备时复现 **29 pass / 0 fail / 3 skip**（退出码 0，`failedChecks: []`）。**故意漏传 `--db-path`** 的那次得到 **27/2** 并把 `no such table: task_drafts` 报成失败 —— 这同时证明 H 层的 ⭐ 判据**真的在读目标 SQLite**（不是假绿），也暴露一条诊断改进项：缺 `--db-path` / `WORKBENCH_EXPECTED_DB_PATH` 时应直说"缺目标 DB 路径"，而不是让错误表现为"表不存在"（已记入接线义务）。
-5. **独立清点 tgz**（不看子代理结论）：`_local-build/current.tgz` = **2 648 241 字节 / 311 条目**；`assets/expert-generation/methodology.md` 1、`package/lib/experts/**` 24、`package/lib/**` 280、`assets/personas/**.md` 15、LICENSE 3、禁止项（`.pending/` / `test/` / `test-results/` / `src/` / `*.log` / `_local-build/`）**0**。解包后对 **302** 个文本条目扫真实本机路径（`Administrator` / `.dsh\profiles` / `Linksight` / `AppData\Local\Temp`）命中 **0**；另有 10 处是**注释里的通用示例路径**（如 `D:\Code\my-repo`、`D:\code\my-project`），非本机泄漏、与本批无关。
+5. **独立清点 tgz**（不看子代理结论）：`_local-build/current.tgz` = **2 648 241 字节 / 311 条目**；`assets/expert-generation/methodology.md` 1、`package/lib/experts/**` 24、`package/lib/**` 280、`assets/personas/**.md` 15、LICENSE 3、禁止项（`.pending/` / `test/` / `test-results/` / `src/` / `*.log` / `_local-build/`）**0**。解包后对 **302** 个文本条目扫真实本机路径（`<user>` / `.dsh\profiles` / `<company>` / `AppData\Local\Temp`）命中 **0**；另有 10 处是**注释里的通用示例路径**（如 `D:\Code\my-repo`、`D:\code\my-project`），非本机泄漏、与本批无关。
 6. **反向注入（主会话自选，第 7 处独立证据）**：把 `current.tgz` 里的 `assets/expert-generation/methodology.md` 抽掉后用 bsdtar 重打成新的 `current.tgz`，同时把 `_local-build/current.txt` 让位，单跑套件 ⇒ **AX-E59-a「包内该有的都有」变红**（28 pass / 1 fail / 3 skip、退出码 1）。还原 `current.tgz` 后 **sha256 `04EC5648…39A0` 与原值逐字节一致**、`current.txt` 原样（`_local-build/` 是派生物，未进 git）。**口径说明**：该变异包是 bsdtar 重打的（333 条目 vs 出厂 311），所以同批变红的另外 3 条 U 层判据（可解压/不该有的/无泄漏）**不能**单独算作那 3 条的灵敏度证据 —— 本注入只证明「该有的都有」这条真的会失败，且 U 层对异常归档 **fail-closed**（不假绿）。
 7. **链证据独立读数**：`test-results/workbench-verify/20261005-212614-a85655/summary.json` 的 `buildIdentity.matched=true`、`sideEffects={"installed":true,"restarted":true,"dbWrites":0,"browsersOpened":0,"tempDirsRemoved":1}`、11 个套件计数与报告逐条一致（`persona 12/0/1`、`expert 29/0/3`）。直接问 `http://127.0.0.1:3080/api/workbench/health` = **`1.16.5` / `wb-8181274a3900fe0b` / schema 19**（确认真机确实在跑我们的构建，不是旧包）。
 8. **文档笔误修正**：`verification.md` §5 的 P9 行原写「`expert.mjs`（1108 行）」，实为 **1115 行**，已由主会话改正并补上 sha256 与本次复核结论。

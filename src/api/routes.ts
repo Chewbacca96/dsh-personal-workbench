@@ -34,6 +34,7 @@ import type { ExpertService } from '../experts/service.js'
 import { normalizeRecentWorkspaces } from '../shared/quickWorkspaceRecent.js'
 import { classifyTaskDay, dayPlacedIds } from '../shared/dailyPlanPolicy.js'
 import { isOpenTask } from '../shared/taskProgress.js'
+import { isUiLocale, normalizeUiLocale } from '../shared/i18n.js'
 import type { WorkbenchSettings } from '../shared/contracts.js'
 import { readPersonaSettings, writePersonaSettings } from '../db/repo/personas.js'
 import { readExpertSettings, writeExpertSettings } from '../db/repo/experts.js'
@@ -167,6 +168,8 @@ export function readWorkbenchSettings(db: DatabaseSync): WorkbenchSettings {
     dailyCapacityIncludeOverdue: (readMeta(db, 'daily_capacity_include_overdue') ?? '0') === '1',
     /** 角色库三个偏好：**唯一读入口**在 `db/repo/personas.ts`（与写入端共用一处形状）。 */
     ...readPersonaSettings(db),
+    /** 界面语言（issue #12）：客户端显示偏好，服务端只持久化。缺省 auto。 */
+    uiLocale: normalizeUiLocale(readMeta(db, 'ui_locale')),
     /**
      * 专家自动召唤（缺省**关**）：**唯一实现**在 `db/repo/experts.ts`。
      *
@@ -248,6 +251,8 @@ export function makeRoutes(db: DatabaseSync, deps: WorkbenchRouteDeps = {}): Web
           const body = await readJsonBody(req)
           if (body === undefined) return writeJson(res, 400, { error: 'invalid JSON body' })
           if (typeof body.defaultWorkspace === 'string') writeMeta(db, 'ai_default_workspace', body.defaultWorkspace)
+          /** 界面语言：只接受封闭枚举；脏值不写（避免设置页显示一个不存在的语言）。 */
+          if (isUiLocale(body.uiLocale)) writeMeta(db, 'ui_locale', body.uiLocale)
           if (body.autoCreateTypeFolders === true || body.autoCreateTypeFolders === false) writeMeta(db, 'auto_create_type_folders', body.autoCreateTypeFolders ? '1' : '0')
           if (body.desktopNotify === true || body.desktopNotify === false) writeMeta(db, 'desktop_notify', body.desktopNotify ? '1' : '0')
           /**

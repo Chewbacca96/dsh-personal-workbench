@@ -105,7 +105,7 @@ test('接线：点子菜单位置复用 placePopover，不再自造第二份摆�
 })
 
 test('接线：菜单 portal 到 body（网格/面板的 overflow 与层叠都管不到它）', () => {
-  assert.match(ideaSource, /createPortal\(menu, document\.body\)/, 'portal 到 body')
+  assert.match(ideaSource, /createPortal\(menu, overlayMountContainer\(\)\)/, '浮层挂到 overlay 挂载点（issue #14）')
   assert.match(ideaSource, /typeof document === 'undefined' \? menu : createPortal/, 'SSR 下退回原位渲染（否则测试与首屏会炸）')
 })
 
@@ -247,8 +247,9 @@ test('任务页：类型从多选下拉升为 Tab，且**其他下拉保留**', 
   const listSection = taskListViewSource
   assert.match(listSection, /<TabBar/, '列表页有类型 Tab')
   assert.doesNotMatch(listSection, /label="类型"/, '原来的「类型」多选下拉必须去掉')
-  assert.match(listSection, /label="状态"/, '状态下拉保留')
-  assert.match(listSection, /label="优先级"/, '优先级下拉保留')
+  // 状态/优先级下拉仍在；文案走 i18n（issue #12）后从字面量变成 t('…')。
+  assert.match(listSection, /label=\{t\('状态'\)\}/, '状态下拉保留')
+  assert.match(listSection, /label=\{t\('优先级'\)\}/, '优先级下拉保留')
   // Tab 是单选 + Ctrl/Cmd 多选：走 toggleTab，不自己写选中逻辑（D17/P3-1 后这份逻辑在 hook 里）
   assert.match(taskListHookSource, /toggleTab\(/, '选中逻辑走共用纯函数')
   assert.doesNotMatch(listSection, /toggleTab\(/, '视图不自己算页签选中')
@@ -346,7 +347,7 @@ test('标签区：单行 + 「更多」浮层，且**不再只渲染前 12 个**
   assert.match(tagFilter, /data-tagmenu/, '有浮层')
   assert.doesNotMatch(knowledgeSource, /tagCounts\.slice\(0, 12\)/, '旧的"只显示前 12 个"必须消失')
   // 浮层的定位前提与点子菜单一致：portal + fixed + 高于面板宿主
-  assert.match(tagFilter, /createPortal\(menu, document\.body\)/, '浮层 portal 到 body')
+  assert.match(tagFilter, /createPortal\(menu, overlayMountContainer\(\)\)/, '浮层挂到 overlay 挂载点（issue #14）')
   const css = readFileSync('src/client/styles.ts', 'utf8')
   const rule = css.match(/\.wb-tagmenu \{[^}]*\}/)
   assert.ok(rule !== null, 'styles.ts 有 .wb-tagmenu 规则')

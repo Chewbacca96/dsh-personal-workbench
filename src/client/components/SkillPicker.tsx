@@ -26,6 +26,7 @@
 import { useMemo, useState } from 'react'
 import type { SkillSummary } from '../../shared/contracts.js'
 import { Icon } from './Icon.js'
+import { useI18n } from '../i18n.js'
 
 export interface SkillPickerProps {
   catalog: readonly SkillSummary[]
@@ -42,6 +43,7 @@ export interface SkillPickerProps {
 export function SkillPicker({
   catalog, loading, available, problem, selected, onToggle, onRetry, disabled = false,
 }: SkillPickerProps): React.ReactNode {
+  const { t } = useI18n()
   const [query, setQuery] = useState('')
   /** 过滤口径：名称 / 描述 / 适用场景，大小写不敏感。 */
   const visible = useMemo(() => {
@@ -56,22 +58,22 @@ export function SkillPicker({
   return (
     <div className="wb-skill-picker">
       <div className="wb-skill-picker-head">
-        <span><Icon name="skill" size={13} /> 加载 Skill</span>
+        <span><Icon name="skill" size={13} />{t('加载 Skill')}</span>
         <span className="wb-skill-count">
           {loading
-            ? '正在读取…'
+            ? t('正在读取…')
             : !available
-              ? '暂不可用'
-              : selected.length > 0 ? `已选 ${selected.length}` : '可选'}
+              ? t('暂不可用')
+              : selected.length > 0 ? t('已选 {n}', { n: selected.length }) : t('可选')}
         </span>
       </div>
 
       {!available && (
         <div className="wb-skill-problem" role="status">
-          <span>{loading ? '正在读取技能目录…' : `暂不可用 —— ${problem}`}</span>
+          <span>{loading ? t('正在读取技能目录…') : t('暂不可用 —— {message}', { message: problem })}</span>
           {!loading && (
             <button type="button" className="wb-btn" disabled={disabled} onClick={onRetry}>
-              <Icon name="refresh" size={12} />重试
+              <Icon name="refresh" size={12} />{t('重试')}
             </button>
           )}
         </div>
@@ -83,21 +85,21 @@ export function SkillPicker({
             className="wb-skill-search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={`搜索技能名或描述（共 ${catalog.length} 个）`}
+            placeholder={t('搜索技能名或描述（共 {n} 个）', { n: catalog.length })}
           />
           {selected.length > 0 && (
             <div className="wb-skill-selected">
               {selected.map((name) => (
-                <button key={name} type="button" className="wb-skill-tag" disabled={disabled} onClick={() => onToggle(name)} title="点击移除">
+                <button key={name} type="button" className="wb-skill-tag" disabled={disabled} onClick={() => onToggle(name)} title={t('点击移除')}>
                   {name}<span aria-hidden="true">×</span>
                 </button>
               ))}
             </div>
           )}
           <div className="wb-skill-list">
-            {loading && <div className="wb-skill-hint">加载技能目录…</div>}
+            {loading && <div className="wb-skill-hint">{t('加载技能目录…')}</div>}
             {!loading && visible.length === 0 && (
-              <div className="wb-skill-hint">{catalog.length === 0 ? '本机暂无可选技能' : '没有匹配的技能'}</div>
+              <div className="wb-skill-hint">{catalog.length === 0 ? t('本机暂无可选技能') : t('没有匹配的技能')}</div>
             )}
             {!loading && visible.map((skill) => {
               const checked = selected.includes(skill.name)
@@ -106,14 +108,14 @@ export function SkillPicker({
                   <input type="checkbox" checked={checked} disabled={disabled} onChange={() => onToggle(skill.name)} />
                   <span className="wb-skill-body">
                     <span className="wb-skill-name">{skill.name}</span>
-                    <span className="wb-skill-desc">{skill.description || '（无描述）'}</span>
+                    <span className="wb-skill-desc">{skill.description || t('（无描述）')}</span>
                   </span>
                   <span className="wb-skill-provider">{skill.provider}</span>
                 </label>
               )
             })}
           </div>
-          <div className="wb-skill-foot">选中后会在提示词开头注入"请加载这些技能"的指令，技能正文由 AI 按需加载。</div>
+          <div className="wb-skill-foot">{t('选中后会在提示词开头注入"请加载这些技能"的指令，技能正文由 AI 按需加载。')}</div>
         </>
       )}
     </div>

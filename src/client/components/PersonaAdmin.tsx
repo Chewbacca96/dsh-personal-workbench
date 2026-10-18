@@ -32,6 +32,7 @@
 import { useMemo, useState } from 'react'
 import type { DraftView } from '../../shared/contracts.js'
 import { Icon } from './Icon.js'
+import { useI18n } from '../i18n.js'
 import {
   EXPERT_STATUS_LABELS,
   expertAdminRows,
@@ -78,6 +79,7 @@ export interface PersonaAdminProps {
 }
 
 export function PersonaAdmin(props: PersonaAdminProps): JSX.Element {
+  const { t } = useI18n()
   const { catalog, loading, error, autoSummon, personaFlags, saving } = props
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<StatusFilter>('all')
@@ -95,31 +97,32 @@ export function PersonaAdmin(props: PersonaAdminProps): JSX.Element {
     <div className="wb-persona-admin" data-wb-experts="admin">
       <div className="wb-persona-toolbar">
         <button type="button" className="wb-btn" data-wb-expert-action="create" onClick={props.onCreate}>
-          新建专家
+          {t('新建专家')}
         </button>
         <button type="button" className="wb-btn" disabled={loading} onClick={() => void props.onRefresh()}>
-          <Icon name="refresh" size={12} />刷新
+          <Icon name="refresh" size={12} />{t('刷新')}
         </button>
         <input
           className="wb-skill-search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder={`搜索专家名 / 简介 / 分组（共 ${catalog.experts.length} 个）`}
+          placeholder={t('搜索专家（共 {n} 个）', { n: catalog.experts.length })}
+          title={t('搜索专家名 / 简介 / 分组（共 {n} 个）', { n: catalog.experts.length })}
         />
         <select
           className="wb-skill-search"
           value={status}
           onChange={(event) => setStatus(event.target.value as StatusFilter)}
-          title="按状态筛选（坏行也会列出来，方便看原因）"
+          title={t('按状态筛选（坏行也会列出来，方便看原因）')}
         >
           {STATUS_FILTERS.map((value) => (
             <option key={value} value={value}>
-              {value === 'all' ? '全部状态' : EXPERT_STATUS_LABELS[value]}
+              {value === 'all' ? t('全部状态') : t(EXPERT_STATUS_LABELS[value])}
             </option>
           ))}
         </select>
         <span className="wb-persona-source">
-          可用 {usableCount}｜★ 已收藏 {favoriteCount}｜停用 {disabledCount}
+          {t('可用 {available}｜★ 已收藏 {favorites}｜停用 {disabled}', { available: usableCount, favorites: favoriteCount, disabled: disabledCount })}
         </span>
       </div>
 
@@ -137,10 +140,9 @@ export function PersonaAdmin(props: PersonaAdminProps): JSX.Element {
           onChange={(event) => void props.onSetAuto(event.target.checked)}
         />
         <span className="wb-switch-desc">
-          允许 AI 自主召唤专家（默认关闭）
+          {t('允许 AI 自主召唤专家（默认关闭）')}
           <br />
-          关闭时手动 <code>@</code> 引用专家与 <code>/expert</code> 命令**照常可用**；
-          打开后 AI 才可能在执行过程中自己挑专家。
+          {t('关闭时手动 @ 引用专家与 /expert 命令照常可用；打开后 AI 才可能在执行过程中自己挑专家。')}
           {autoSummon.error !== null && (
             <span className="wb-notes-warn" data-wb-expert-error={autoSummon.error.code}>
               {autoSummon.error.message}
@@ -151,8 +153,8 @@ export function PersonaAdmin(props: PersonaAdminProps): JSX.Element {
 
       {error !== null && (
         <div className="wb-skill-problem" role="status" data-wb-expert-error={error.code}>
-          <span>专家目录读不到 —— {error.message}</span>
-          <button type="button" className="wb-btn" onClick={() => void props.onRefresh()}><Icon name="refresh" size={12} />重试</button>
+          <span>{t('专家目录读不到 —— {message}', { message: error.message })}</span>
+          <button type="button" className="wb-btn" onClick={() => void props.onRefresh()}><Icon name="refresh" size={12} />{t('重试')}</button>
         </div>
       )}
       {personaFlags.notice !== '' && <div className="wb-hint">{personaFlags.notice}</div>}
@@ -169,7 +171,7 @@ export function PersonaAdmin(props: PersonaAdminProps): JSX.Element {
       {props.pendingExpertDrafts.length > 0 && (
         <div className="wb-notes">
           <div className="wb-notes-body">
-            <b>待确认草稿 {props.pendingExpertDrafts.length} 份</b> —— 还没有安装到你的用户库。
+            <b>{t('待确认草稿 {n} 份 —— 还没有安装到你的用户库。', { n: props.pendingExpertDrafts.length })}</b>
           </div>
           <div className="wb-persona-admin-list">
             {props.pendingExpertDrafts.map((draft) => (
@@ -177,11 +179,11 @@ export function PersonaAdmin(props: PersonaAdminProps): JSX.Element {
                 <div className="wb-persona-info">
                   <div className="wb-persona-name">{pendingTitle(draft)}</div>
                   <div className="wb-persona-desc">{pendingRequest(draft)}</div>
-                  <div className="wb-persona-source">草稿 {draft.id}</div>
+                  <div className="wb-persona-source">{t('草稿 {id}', { id: draft.id })}</div>
                 </div>
                 <div className="wb-persona-actions">
-                  <button type="button" className="wb-persona-flag" onClick={() => props.onOpenDraft(draft)}>查看草稿</button>
-                  <button type="button" className="wb-persona-flag" onClick={() => props.onEditDraft(draft)}>继续修改</button>
+                  <button type="button" className="wb-persona-flag" onClick={() => props.onOpenDraft(draft)}>{t('查看草稿')}</button>
+                  <button type="button" className="wb-persona-flag" onClick={() => props.onEditDraft(draft)}>{t('继续修改')}</button>
                 </div>
               </div>
             ))}
@@ -190,10 +192,10 @@ export function PersonaAdmin(props: PersonaAdminProps): JSX.Element {
       )}
 
       <div className="wb-persona-admin-list">
-        {loading && <div className="wb-persona-note">读取专家目录…</div>}
+        {loading && <div className="wb-persona-note">{t('读取专家目录…')}</div>}
         {!loading && rows.length === 0 && (
           <div className="wb-persona-note">
-            {catalog.experts.length === 0 ? '目录为空（内置库没打包进来？）' : '没有匹配的专家'}
+            {catalog.experts.length === 0 ? t('目录为空（内置库没打包进来？）') : t('没有匹配的专家')}
           </div>
         )}
         {!loading && rows.map((row) => (
@@ -206,11 +208,11 @@ export function PersonaAdmin(props: PersonaAdminProps): JSX.Element {
             <div className="wb-persona-info">
               <div className="wb-persona-name" title={row.id}>
                 {row.name}
-                {row.status !== 'usable' && <span className="wb-persona-off-tag">{row.statusLabel}</span>}
+                {row.status !== 'usable' && <span className="wb-persona-off-tag">{t(row.statusLabel)}</span>}
               </div>
-              <div className="wb-persona-desc">{row.description === '' ? '（无简介）' : row.description}</div>
+              <div className="wb-persona-desc">{row.description === '' ? t('（无简介）') : row.description}</div>
               <div className="wb-persona-source">
-                {row.sourceLabel}{row.group === '' ? '' : `｜${row.group}`}｜{row.sourceKeyLabel}｜{row.provenanceLabel}
+                {[t(row.sourceLabel), t(row.group), row.sourceKeyLabel.startsWith('外部目录') ? `${t('外部目录')}${row.sourceKeyLabel.slice('外部目录'.length)}` : t(row.sourceKeyLabel), t(row.provenanceLabel)].filter((part) => part !== '').join('｜')}
               </div>
               {row.issueLines.length > 0 && (
                 <div className="wb-notes-warn">{row.issueLines.join('；')}</div>
@@ -221,10 +223,10 @@ export function PersonaAdmin(props: PersonaAdminProps): JSX.Element {
                 */}
               {(row.sourceLines.length > 0 || row.skillLines.length > 0) && (
                 <details className="wb-notes">
-                  <summary>来源与技能</summary>
+                  <summary>{t('来源与技能')}</summary>
                   <div className="wb-notes-body">
                     {row.sourceLines.length === 0
-                      ? <p>没有登记上游来源。</p>
+                      ? <p>{t('没有登记上游来源。')}</p>
                       : <ul className="wb-list">{row.sourceLines.map((line, index) => <li key={`s${index}`}>{line}</li>)}</ul>}
                     {row.skillLines.length > 0 && (
                       <ul className="wb-list">{row.skillLines.map((line, index) => <li key={`k${index}`}>{line}</li>)}</ul>
@@ -239,18 +241,18 @@ export function PersonaAdmin(props: PersonaAdminProps): JSX.Element {
                 className={`wb-persona-flag${row.favorite ? ' on' : ''}`}
                 disabled={flagBusy || saving}
                 onClick={() => void props.onToggleFavorite(row.id)}
-                title={row.favorite ? '取消收藏' : '收藏（选择器里可用「只看收藏」筛出来）'}
+                title={row.favorite ? t('取消收藏') : t('收藏（选择器里可用「只看收藏」筛出来）')}
               >
-                {row.favorite ? '★ 已收藏' : '☆ 收藏'}
+                {row.favorite ? t('★ 已收藏') : t('☆ 收藏')}
               </button>
               <button
                 type="button"
                 className="wb-persona-flag"
                 disabled={flagBusy || saving}
                 onClick={() => void props.onToggleDisabled(row.id)}
-                title={row.enabled ? '停用：不再出现在可选列表里（这里仍列出来，可随时启用回来）' : '重新启用'}
+                title={row.enabled ? t('停用：不再出现在可选列表里（这里仍列出来，可随时启用回来）') : t('重新启用')}
               >
-                {row.enabled ? '停用' : '启用'}
+                {row.enabled ? t('停用') : t('启用')}
               </button>
             </div>
           </div>
@@ -262,12 +264,12 @@ export function PersonaAdmin(props: PersonaAdminProps): JSX.Element {
         * 新建专家**会在用户确认后写用户库**。这里只保留真实口径。
         */}
       <details className="wb-notes">
-        <summary>说明（来源与写入范围 / 停用为何仍列出）</summary>
+        <summary>{t('说明（来源与写入范围 / 停用为何仍列出）')}</summary>
         <div className="wb-notes-body">
-          <p><b>内置 / 外部角色只读</b>：工作台不复制、不修改、不覆盖它们。</p>
-          <p><b>新建专家只在用户确认后写入用户库</b>：AI 先暂存成草稿，确认前不落盘到用户库。</p>
-          <p><b>停用的角色仍会列在这里</b>（否则就启用不回来了），只是不能在选择器中选中。</p>
-          <p>角色正文与资源由 <code>workbench_load_persona</code> / <code>workbench_read_persona_resource</code> 按需读取，<b>不预先塞进提示词</b>。</p>
+          <p><b>{t('内置 / 外部角色只读')}</b>：{t('工作台不复制、不修改、不覆盖它们。')}</p>
+          <p><b>{t('新建专家只在用户确认后写入用户库')}</b>：{t('AI 先暂存成草稿，确认前不落盘到用户库。')}</p>
+          <p><b>{t('停用的角色仍会列在这里')}</b>{t('（否则就启用不回来了），只是不能在选择器中选中。')}</p>
+          <p>{t('角色正文与资源由')} <code>workbench_load_persona</code> / <code>workbench_read_persona_resource</code> {t('按需读取，不预先塞进提示词。')}</p>
         </div>
       </details>
     </div>

@@ -123,7 +123,7 @@ function fakeSubagents() {
         agent: {
           session: {
             id: childId,
-            header: { origin: 'subagent', parentSession: parentId, cwd: 'D:/Code/Linksight/dsh-workbench' },
+            header: { origin: 'subagent', parentSession: parentId, cwd: 'D:/Code/<company>/dsh-workbench' },
           },
         },
       }
@@ -170,7 +170,7 @@ function deferred() {
 
 function parentExec(sessionId, extra = {}) {
   return {
-    agent: { session: { id: sessionId, header: { cwd: 'D:/Code/Linksight/dsh-workbench' } }, options: {} },
+    agent: { session: { id: sessionId, header: { cwd: 'D:/Code/<company>/dsh-workbench' } }, options: {} },
     ...extra,
   }
 }

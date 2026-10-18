@@ -215,7 +215,7 @@ test('层级：文档/目录弹窗必须盖得住打开它的对话框，且 por
 
   const modal = readFileSync(new URL('../src/client/components/LocalDocModal.tsx', import.meta.url), 'utf8')
   assert.match(modal, /createPortal\(/, 'LocalDocModal 必须 portal（内联在面板里会被祖先的 overflow/transform 裁剪，且层级排不上）')
-  assert.match(modal, /document\.body,?\s*\)/s, 'portal 的目标必须是 document.body（与 components/Modal.tsx 一致）')
+  assert.match(modal, /overlayMountContainer\(\)/, 'portal 的目标必须走 overlayMountContainer（issue #14：宿主 overlay 层优先，退回 body）')
 })
 
 /**
