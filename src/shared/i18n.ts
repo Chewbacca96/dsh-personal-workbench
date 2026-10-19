@@ -483,4 +483,8 @@ export const EN_MESSAGES: Record<string, string> = {
   '收藏与停用在设置里改 · 角色正文由 AI 按需加载，不写进提示词': 'Change favorites and disabled state in Settings · Persona text is loaded on demand by the AI and is not written into prompts.',
   '通用工作方式': 'General ways of working',
   '领域岗位': 'Domain roles',
+  // ── 入口（侧栏面板行 / 会话标题栏按钮） ────────────────────────────────────
+  '工作台': 'Workbench',
+  '打开工作台（任务 / 日历 / 知识库 / 点子）': 'Open Workbench (tasks / calendar / knowledge / ideas)',
+  '收起工作台': 'Close Workbench',
 }
