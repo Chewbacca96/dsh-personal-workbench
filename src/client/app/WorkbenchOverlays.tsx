@@ -28,6 +28,17 @@ export function WorkbenchOverlays(props: WorkbenchAssembly): JSX.Element {
   const { draftSwitchedFrom, duplicatePrompt, pendingDraft } = props.draftsApi
   const { dismissDraft, handleDraftConfirmed, reuseExistingTask, setDraftProblems, setDuplicatePrompt, setPendingDraft } = props.draftsApi.actions
   const { pushToast, setError } = props.feedback.actions
+  /**
+   * 文件夹（= 点子王）的「新建 / 重命名」表单。
+   *
+   * issue #15 的根因就在这里：D17 拆分（b9182b8）把这段渲染丢了 ——
+   * 弹窗原先在 index.tsx 的 2942 行，按区域切文件时既不属 ideas 详情区的三个分支、
+   * 也不在提示层的搬迁区间（845–1001 行），于是 `folderForm` 变成**只有写、没有读**的死状态：
+   * 五个入口照样 set，保存动作照样能发 POST，但点了没反应、也不报错。
+   * 现在由提示层统一承接，与拆分前的交互一致（打开即聚焦名称输入框、Enter 提交、Esc / 遮罩关闭）。
+   */
+  const { folderForm, patchFolderForm, setFolderForm } = props.ideas
+  const { saveFolder } = props.ideas.actions
   const { reminderModalOpen, reminders } = props.remindersApi
   const { ackReminder, setReminderModalOpen } = props.remindersApi.actions
   const { aiSessionUsable, closePanel, ideas, knowledge, loadModelModalityTable, runtime } = props
@@ -202,6 +213,61 @@ export function WorkbenchOverlays(props: WorkbenchAssembly): JSX.Element {
               （可在任务列表页「查看归档」恢复，不会丢数据）。
             </div>
           </div>
+        </Modal>
+      )}
+
+      {/**
+        * 文件夹（点子王）新建 / 重命名表单 —— issue #15。
+        *
+        * 只做渲染：标题非空的校验与 POST/PATCH 请求都在 `useIdeas.saveFolder` 里（单一实现）；
+        * 这里不再自己拼请求，也不复制一遍校验（否则就是规范禁止的"同一语义第二处实现"）。
+        *
+        * 「创建 / 保存」在标题为空时禁用：旧实现是点了才由 hook 报"文件夹名称不能为空"，
+        * 而文案落在面板里的错误条上、被弹窗遮住 = 静默失败；禁用让"为什么点不动"直接可见。
+        */}
+      {folderForm !== null && (
+        <Modal
+          title={<><Icon name="folder" />{folderForm.mode === 'create' ? '新建文件夹' : '重命名文件夹'}</>}
+          size="sm"
+          onClose={() => setFolderForm(null)}
+          footer={(
+            <>
+              <span className="wb-foot-note">文件夹 = 点子王；删除文件夹不会删除点子，它们会回到「未归类」</span>
+              <button className="wb-btn" onClick={() => setFolderForm(null)}>取消</button>
+              <button
+                className="wb-btn primary"
+                disabled={folderForm.title.trim() === ''}
+                onClick={() => saveFolder()}
+              >
+                {folderForm.mode === 'create' ? '创建' : '保存'}
+              </button>
+            </>
+          )}
+        >
+          <label className="wb-field">
+            <span>文件夹名称</span>
+            <input
+              data-autofocus="true"
+              value={folderForm.title}
+              onChange={(e) => patchFolderForm({ title: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return
+                e.preventDefault()
+                // 与按钮同一个准入门槛：标题为空时不发请求（不发、也不留一条看不见的错误）
+                if (folderForm.title.trim() !== '') saveFolder()
+              }}
+              placeholder="例如：工作台 · 微信提醒方向"
+            />
+          </label>
+          <label className="wb-field" style={{ marginTop: 12 }}>
+            <span>一句话说明<span className="wb-field-note">（可选）</span></span>
+            <textarea
+              rows={3}
+              value={folderForm.summaryMd}
+              onChange={(e) => patchFolderForm({ summaryMd: e.target.value })}
+              placeholder="这个文件夹收的是哪一类点子"
+            />
+          </label>
         </Modal>
       )}
     </>

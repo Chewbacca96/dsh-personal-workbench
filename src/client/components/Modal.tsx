@@ -69,7 +69,12 @@ export function Modal({ title, titleExtra, size = 'md', footer, onClose, closeOn
     // 记住打开前的焦点，关闭后还回去（键盘用户不会迷失位置）
     restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const panel = panelRef.current
-    const first = panel?.querySelector<HTMLElement>(FOCUSABLE)
+    /**
+     * 优先聚焦弹窗里标了 `data-autofocus` 的主字段（例如「新建文件夹」的名称输入框）：
+     * 否则 FOCUSABLE 的第一个永远是标题栏的关闭按钮 —— 打开弹窗后打字没反应，等于白开。
+     */
+    const preferred = panel?.querySelector<HTMLElement>('[data-autofocus]:not([disabled])')
+    const first = preferred ?? panel?.querySelector<HTMLElement>(FOCUSABLE)
     ;(first ?? panel)?.focus()
     return () => { restoreFocusRef.current?.focus?.() }
   }, [nonModal])
