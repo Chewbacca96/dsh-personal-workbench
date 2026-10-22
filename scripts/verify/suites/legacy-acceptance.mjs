@@ -15,7 +15,7 @@
  * | 找不到入口/返回按钮 → 后续 check 静默少测 | **一律记 fail**（harness.require） | LEG 文档明写"找不到入口/返回按钮是失败，不跳过" |
  * | LEG-A09 的标题写"收起后再点"、动作其实是"再点一次" | **按实际序列执行**，在 detail 里写明 | LEG 文档要求"迁移需显式记录实际序列，不以标题虚报步骤" |
  */
-import { startSuite, createApi, launchSuiteBrowser, parseSuiteArgs, sleep, waitFor, safeJson, removeDirWithRetry, readBuiltBuildId } from './_harness.mjs'
+import { startSuite, createApi, launchSuiteBrowser, parseSuiteArgs, sleep, waitFor, safeJson, removeDirWithRetry, readBuiltBuildId, backButtonExpr } from './_harness.mjs'
 import { discoverBrowser } from '../browser.mjs'
 
 const options = parseSuiteArgs()
@@ -97,12 +97,9 @@ const FIND_ENTRY = `
   return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), ours: row.hasAttribute('data-dsh-personal-workbench-entry'), aria: row.getAttribute('aria-label') };
 `
 
-const FIND_BACK = `
-  const b = Array.from(document.querySelectorAll('button')).find((x) => (x.textContent || '').includes('返回对话'));
-  if (b === undefined) return null;
-  const r = b.getBoundingClientRect();
-  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), w: Math.round(r.width), h: Math.round(r.height) };
-`
+// 定位规则只在 _harness.backButtonExpr() 一处（en-US 下这个按钮渲染成 `Back`）。
+const FIND_BACK = backButtonExpr()
+
 
 const report = {}
 let browser

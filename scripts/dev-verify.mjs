@@ -77,6 +77,16 @@ export const ALLOWED_REQUIRED_SKIPS = [
     check: '真实模型调用 workbench_load_persona 并返回所选角色正文（模型链路）',
     reason: '需要真实模型链路；绑定/加载语义已在 H 层用真实 HTTP 证明（按规格记未验证，不记 pass）',
   },
+  {
+    suite: 'expert',
+    check: "AX-E61 ⭐ 真实模型：父绑定 A 时 @ 专家 B，子代理走专用 loader 且父仍为 A（模型链路）",
+    reason: "需要真实模型链路：父轮 + 子代理轮 + 复核父绑定轮（≥3 次真实调用，超出 MODEL_CALL_BUDGET 的单条余量）；通道前置 AX-E61-a 与「任何路径都不写绑定」的静态面已分别判过",
+  },
+  {
+    suite: 'expert',
+    check: "AX-E62 ⭐ 真实模型：auto=true 自主召唤、关闭后该轮无自主 schema/prompt（模型链路）",
+    reason: "需要两轮真实模型会话（开→自主召唤；关→下一轮 request/header 的 tools[] 不再有 summon_expert）；开关真值可读性已单记 AX-E62-a",
+  },
 ]
 
 export function parseArgs(argv) {

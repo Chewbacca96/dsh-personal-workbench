@@ -163,6 +163,35 @@ export async function ensureWorkbenchPanel(browser, options = {}) {
   return await readOpen()
 }
 
+// ── 可翻译文案的定位 ────────────────────────────────────────────────────────
+
+/**
+ * 「返回对话」按钮**在两种界面语言下的文案**。
+ *
+ * 为什么需要这张表：界面语言（issue #12）跟随设置，en-US 下这个按钮渲染成 `Back`
+ * （src/shared/i18n.ts 的 `'返回对话': 'Back'`）。2026-10-22 实测：legacy-acceptance 与
+ * legacy-final-2 各自硬编码中文文案，于是在英文界面的 verify 库上 LEG-A10/A11 与
+ * LEG-F05/F06 全红，而报错写的是"找不到按钮"——把定位失败伪装成业务回归，方向完全相反。
+ *
+ * 定位规则只留这一处：套房都从这里取表达式，不再各写一份（同一语义第二处实现必然漂移）。
+ */
+export const BACK_BUTTON_LABELS = ['返回对话', 'Back']
+
+/**
+ * 生成"找到返回对话按钮并返回中心点"的页面求值表达式。
+ * 找不到返回 null，调用方按 `require`（前置缺失一律记失败，不许条件少测）。
+ */
+export function backButtonExpr() {
+  return `
+  const labels = ${JSON.stringify(BACK_BUTTON_LABELS)};
+  const label = (x) => (x.textContent || '').trim();
+  const b = Array.from(document.querySelectorAll('button')).find((x) => labels.includes(label(x)));
+  if (b === undefined || b === null) return null;
+  const r = b.getBoundingClientRect();
+  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), w: Math.round(r.width), h: Math.round(r.height) };
+`
+}
+
 // ── 结果记录 ────────────────────────────────────────────────────────────────
 
 export const CHECK_LAYERS = new Set(['U', 'H', 'W', 'B', 'N'])

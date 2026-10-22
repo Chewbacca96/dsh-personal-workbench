@@ -15,7 +15,7 @@
  *    `results` 为空 → `0/0 通过`、退出码 0。迁移后异常一律 `suite.fatalError()`。
  * 4. 端口写死 9785 → 动态空闲端口。
  */
-import { startSuite, createApi, launchSuiteBrowser, parseSuiteArgs, sleep, waitFor, safeJson } from './_harness.mjs'
+import { startSuite, createApi, launchSuiteBrowser, parseSuiteArgs, sleep, waitFor, safeJson, backButtonExpr } from './_harness.mjs'
 import { discoverBrowser } from '../browser.mjs'
 
 const options = parseSuiteArgs()
@@ -71,12 +71,8 @@ const FIND_ENTRY = `
   return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
 `
 
-const FIND_BACK = `
-  const b = Array.from(document.querySelectorAll('button')).find((x) => (x.textContent || '').includes('返回对话'));
-  if (b === null || b === undefined) return null;
-  const r = b.getBoundingClientRect();
-  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), w: Math.round(r.width) };
-`
+// 定位规则只在 _harness.backButtonExpr() 一处（en-US 下这个按钮渲染成 `Back`）。
+const FIND_BACK = backButtonExpr()
 
 const report = {}
 let browser
