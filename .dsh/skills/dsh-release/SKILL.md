@@ -6,13 +6,23 @@ whenToUse: 本轮要动 public 版本号、要给仓库打 tag、要 `npm publis
 
 # DSH 插件公开发布（硬门禁）
 
-> 版本：**V1.4.1（2026-10-05）**。V1.0.0 的条目全部来自真实发布里**实际犯过的错**（一次发了
+> 版本：**V1.4.2（2026-10-22）**。V1.0.0 的条目全部来自真实发布里**实际犯过的错**（一次发了
 > 1.15.2 / 1.15.3 / 1.15.4 三个版本）；V1.1.0 并入团队记忆里的发布教训；V1.2.0 并入 v1.16.1 这一版
 > 的真实翻车；V1.3.0 把门禁从"文档里的步骤"变成"一条可执行的命令"；
 > **V1.4.0 用 v1.16.5 的实测把「npm 只 stage、不发布」写死成判据**（见下）；
 > **V1.4.1 不再假设跨项目源仓库的克隆在哪** —— 本机 2026-10-05 已把它从用户主目录迁到 `D:\Code` 下，
 > 原文那句"本机克隆在用户主目录下的同名目录"会把人引去一个不存在的目录、甚至诱发**再克隆一份**；
 > 改成"先在本机找现有克隆"。
+>
+> **V1.4.2 改了什么、为什么**（2026-10-22 发 v1.17.1 的真实发布）：
+>
+> | 改动 | 触发它的真实事故 |
+> |---|---|
+> | §7 新增**形状 C**：只进暂存区、之后靠"账户开 2FA"被**自动放行**；并写死 **404 后不许立刻 bump 版本号** | v1.17.1 用 bypass GAT 发 → 打印 `✅ Published package` 但版本与 tarball 全 404；账户当时没开 2FA。用户开 2FA 的那一刻暂存版本自己上线（`time[version]` 比任何命令都晚）。我按 404 误判"没发出去"，bump 到 1.17.2 并推了 main + tag，只能再 `git revert` + 重建 tag 收场 |
+> | §5 明确**账户没开 2FA 时交互式发布根本不存在**（先让用户开 2FA），以及**绝不能拿恢复码当 `--otp`** | 恢复码 → `E403 Your account has been temporarily suspended due to a recent security-sensitive action.`（**72 小时安全冻结**：不能发布 / 建令牌 / 改设置） |
+> | §5 明确**交互式 2FA 要求 stdout 是 TTY** | 终端里 `npm publish … > log 2>&1` 直接 `EOTP` 失败（npm 的 `otplease` 见非 TTY 就抛错），URL 还被打码；改成只重定向 stderr 才走通 |
+> | §11 更正"GAT 一律发不出去"的时间线：这是**滚动上线** | 10-18 的 v1.17.0 用同一令牌**当场公开**；10-22 的 v1.17.1 同一令牌**只 stage** ⇒ 行为看日期没用，只看 registry |
+> | §7 补 buildId 的**实测口径**（同源码重建 = 同一 buildId） | v1.17.1：本地重建得 `wb-a9060c530c5df98e`，与 registry tarball 内 `lib/build-info.json` 相同，用于回答"上线的是不是我构建的那份" |
 >
 > **V1.4.0 改了什么、为什么**（全部来自 2026-10-05 发 v1.16.5 的真实发布）：
 >
@@ -254,6 +264,21 @@ Remove-Item $tmp -Force; Remove-Item Env:\NPM_CONFIG_USERCONFIG
 > `npm whoami` / `npm view` / 直连 registry 这类**只读核对**。发布时**不要**设 `NPM_CONFIG_USERCONFIG`（那会把身份切成令牌），
 > 直接在用户自己的终端里 `npm publish --access public` 并输入 2FA 验证码；AI 不得索要 OTP。
 
+> ⚠️ **2026-10-22 增补（发 v1.17.1 实测）**：
+>
+> - **账户没开 2FA 时，"会话身份 + 交互式"这条路根本不存在**：会话身份跑 `npm publish` 直接回
+>   `E403 Two-factor authentication or granular access token with bypass 2fa enabled is required to publish packages.`
+>   ⇒ 此时唯一正确的动作是**让用户去 npmjs.com 开启 2FA**（authenticator 或 security key），不是换令牌反复重发。
+> - **绝不能把恢复码（recovery code）当 `--otp` 传**：npm 回
+>   `E403 Your account has been temporarily suspended due to a recent security-sensitive action.`
+>   —— 用恢复码登录会触发 **72 小时安全冻结**（不能发布 / 建令牌 / 改账户设置），冻结期内再试也是白试。
+> - **交互式 2FA 要求 stdin 与 stdout 都是 TTY**：npm 的 `lib/utils/auth.js#otplease` 开头就
+>   `if (!process.stdin.isTTY || !process.stdout.isTTY) throw err`。终端里发布**任何 `>` / `2>&1 | tee` 都会让
+>   2FA 流程直接以 `EOTP` 失败**，且错误里的 URL 被打码；要留日志只能 `npm publish --access public 2>> log`
+>   （只重定向 stderr，stdout 留在终端）。
+> - 交互式流程会**自动打开浏览器**做安全密钥验证并轮询 `doneUrl`，进程会一直挂着等 —— 这是正常行为，别当卡死杀掉；
+>   但**只推 tag 不等于发布成功**，最终仍按第 7 条判据看 registry。
+
 ## 第 6 条：本机网络现实（会伪装成 git / npm 故障）
 
 - `github.com:443` **直连不通**，必须给**那一条命令**临时加：
@@ -296,6 +321,11 @@ v1.16.5 实测：本地算 `8c3c10f74d0d7bb32c4df82d19f26a1932e6d2cf`、registry
 `packageManager` / `prepare`（本仓历来的发布形态，1.16.2 / 1.16.3 / 1.16.4 同样如此）。
 要回答"上线的是不是我构建的那份"，用**逐文件哈希 + buildId**，别用 tarball 字节哈希。
 
+> **buildId 的实测口径**（v1.17.1）：同一份源码（`package.json` 的 version 相同）重新 `pnpm build` 会得到
+> **同一个 buildId**（`sha256(相对路径+内容哈希)` 前 16 位，不含时间戳）；从 registry 下回的 tarball 里解出
+> `package/lib/build-info.json` 与之相等 ⇒ "上线的是我构建的那份"这步就闭环了。
+> 若本地 `lib/` 还是旧版本号构建出来的（version 字段会露馅），先 `pnpm build` 再比。
+
 **三个会骗人的信号**（v1.16.1 实测，v1.16.5 补一行）：
 
 | 信号 | 真相 |
@@ -318,6 +348,13 @@ v1.16.5 实测：本地算 `8c3c10f74d0d7bb32c4df82d19f26a1932e6d2cf`、registry
   此时 `npm stage list` 往往是**空的** —— v1.16.5 实测**两种身份都是空**（会话身份这次不报 `E401`，
   而是 `200` + `[]`；端点就是 `GET /-/stage?page=0&perPage=100&package=…`），
   即**根本没有 stage-id 可 `approve/reject`**，"去 approve 一下"这条退路不存在。
+- **形状 C**（v1.17.1，2026-10-22）：命令打印 `✅ Published package`，`GET /<pkg>/<ver>` 与 tarball **都 404** —— 
+  外形和第 B 种一模一样，但其实**它真进了暂存区**：账户开启 2FA 的那一刻，npm 把暂存版本**自动放行**，
+  版本随即公开（`packument.time[<ver>]` 落在"开 2FA"之后几十秒，**期间没有跑过任何发布命令**）。
+  ⇒ **404 ≠ 没发出去**：先把 `dist-tags.latest` 与 `time[<ver>]` 放着看几分钟（暂存放行 + 边缘传播都可能滞后）。
+- ⛔ **不要在 404 之后立刻 bump 版本号重发**（v1.17.1 的真实翻车）：当时据此把 1.17.1 改成 1.17.2、推了 main 与 tag，
+  几分钟后暂存的 1.17.1 自己上线，只能再 `git revert` + 删远端 tag + 重建 tag 收场。
+  版本号是**公开且不可回退的事实**，在确认"确实没发出去"之前别动它；宁可多等十分钟。
 - **解法**（v1.16.5 就是这样落地的）：在**正确目录**用**会话身份**（`npm login`，2FA）
   **交互式**重发一次 `npm publish --access public`（用 `npm`，不要用带 bypass 令牌的 `pnpm`），
   让那次暂存提交**补完**；其后 tarball 还可能有**数分钟到十几分钟的边缘传播延迟**，退避重试即可。
@@ -376,7 +413,10 @@ v1.16.5 实测：本地算 `8c3c10f74d0d7bb32c4df82d19f26a1932e6d2cf`、registry
 
 ## 第 11 条：npm 平台变更（2026，会以"莫名其妙的报错"形式出现）
 
-- **bypass-2FA 粒度令牌（GAT）已不能直接发布**（v1.16.5 的 2026-10-05 实测，不再是"预告"）：
+- **bypass-2FA 粒度令牌（GAT）正在被剥夺直接发布能力，而且是"滚动上线"，不是一刀切**：
+  v1.16.5（2026-10-05）看到它只 stage；**v1.17.0（2026-10-18）用同一个 `.npm_token.txt` 却当场公开发布了**；
+  再到 **v1.17.1（2026-10-22）又退回只 stage**（随后靠账户开 2FA 被自动放行）。⇒ **别用"上次行不行"推断这次**，
+  每次都按第 7 条去 registry 验；令牌本身仍可用于只读核对。原委：
   账户/包管理类操作 2026-08 起已要求交互式 2FA；用它跑 `pnpm publish` **退出码 0、还会打印
   `✅ Published package`，实际只把版本送进暂存区**。npm 自己会打一条 deprecation notice
   （<https://gh.io/npm-gat-bypass2fa-deprecation>）—— **看到这条通告就别再指望这个令牌能把包发出去**。
@@ -412,6 +452,10 @@ v1.16.5 实测：本地算 `8c3c10f74d0d7bb32c4df82d19f26a1932e6d2cf`、registry
 10. **Release 建了吗**（不是只推 tag）、Title **只写版本号**、`releases/latest` 指向它？
 11. `npm pack` 拉回真实产物复核过？**用户视角 `npm i`（全新缓存）装得上？**
     profile 要不要切、要不要让用户重启？
+12. **publish 之后查到 404，先别动版本号**：看 `packument.time[<ver>]` 与 `dist-tags.latest`、等几分钟 ——
+    暂存版本可能在账户开 2FA 后被自动放行（形状 C）；确认真没发出去再考虑重发。
+13. **账户有 2FA 吗？用的是恢复码还是验证器？** 没 2FA → 先让用户开（E403）；恢复码当 OTP → 72h 安全冻结；
+    在终端跑 2FA 发布时**不要重定向 stdout**（`otplease` 见非 TTY 直接 EOTP）。
 
 ## 参考
 
