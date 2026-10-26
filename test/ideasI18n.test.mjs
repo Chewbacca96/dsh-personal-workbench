@@ -84,3 +84,67 @@ test('点子-вкладка: словарь не разъезжается по �
   assert.match(EN_MESSAGES['归入文件夹 ▾'], /^File into folder/)
   assert.match(EN_MESSAGES['AI 关联（已选 {n}）'], /link/i)
 })
+
+/**
+ * Диапазоны аргументов `t(…)`: сбалансированные скобки.
+ * Нужно потому, что часть ключей достигается выражением внутри вызова —
+ * `t(mode === 'create' ? '新建文件夹' : '重命名文件夹')`. Литералы внутри такого вызова
+ * обёрнуты, хотя непосредственно перед ними нет `t(`.
+ */
+function wrappedSpans(text) {
+  const spans = []
+  for (const m of text.matchAll(/\bt\(/g)) {
+    let i = m.index + 2
+    let depth = 1
+    while (i < text.length && depth > 0) {
+      if (text[i] === '(') depth++
+      else if (text[i] === ')') depth--
+      i++
+    }
+    spans.push([m.index, i])
+  }
+  return spans
+}
+
+test('окно формы папки (issue #15) говорит на t(): ни одного необёрнутого литерала и все ключи заведены', () => {
+  /**
+   * v1.17.1 вернул окно «新建 / 重命名文件夹» в `WorkbenchOverlays.tsx` — и сделал это осознанно
+   * без `t()` («深层 i18n 是 issue #12 的后续范围»). Этот тест — тот самый следующий заход:
+   * он не трогает остальную часть файла (там ещё ≈18 подписей другой области), а проверяет
+   * ровно тот блок, который относится к вкладке点子.
+   */
+  const source = stripComments(read('src/client/app/WorkbenchOverlays.tsx'))
+  const start = source.indexOf('{folderForm !== null && (')
+  assert.ok(start !== -1, 'якорь `{folderForm !== null && (` не найден — окно папок переехал, синхронизируйте тест')
+  const end = source.indexOf('</Modal>', start)
+  assert.ok(end > start, 'блок окна не закрыт `</Modal>` — якорь съехал')
+  const block = source.slice(start, end)
+  const spans = wrappedSpans(block)
+
+  const unwrapped = []
+  const missing = []
+  for (const m of block.matchAll(/(['"`])((?:[^'"`\\\n]|\\.)*)\1/g)) {
+    if (!CJK.test(m[2])) continue
+    const key = decode(m[2])
+    if (!spans.some(([from, to]) => m.index >= from && m.index < to)) {
+      unwrapped.push(key)
+      continue
+    }
+    if (!(key in EN_MESSAGES)) missing.push(key)
+  }
+  assert.deepEqual(unwrapped, [], `в окне формы папки остались необёрнутые литералы: ${unwrapped.join(' | ')}`)
+  assert.deepEqual(missing, [], `нет словарных статей: ${missing.join(' | ')}`)
+})
+
+test('окно формы папки: два режима называются согласованно с кнопкой и с вкладкой', () => {
+  // Заголовок окна, кнопка в панели инструментов и вкладка счётчика должны говорить одними
+  // словами: New folder / Rename folder / Folders (n). Иначе «新建文件夹» и «重命名文件夹»
+  // откроют окно, которое подписано другим термином, а вкладка рядом назовёт то же третье.
+  assert.equal(EN_MESSAGES['新建文件夹'], 'New folder')
+  assert.equal(EN_MESSAGES['重命名文件夹'], 'Rename folder')
+  assert.equal(EN_MESSAGES['文件夹（{n}）'], 'Folders ({n})')
+  assert.equal(EN_MESSAGES['创建'], 'Create')
+  assert.equal(EN_MESSAGES['保存'], 'Save')
+  // Подсказка в подвале окна обязана называть ту же вкладку, что и сам список:「未归类」= Unfiled.
+  assert.match(EN_MESSAGES['文件夹 = 点子王；删除文件夹不会删除点子，它们会回到「未归类」'], /Unfiled/)
+})

@@ -802,4 +802,13 @@ export const EN_MESSAGES: Record<string, string> = {
   '新记的点子会先出现在这里': 'Newly captured ideas show up here first',
   '还没有文件夹': 'No folders yet',
   '先手动建一个，或者选中 2 个以上点子点「AI 关联」自动生成': 'Create one manually, or select 2 or more ideas and use “AI link” to generate one',
+  // ── вкладка点子: восстановленное окно формы папки (issue #15) ────────────────────────────────────
+  '重命名文件夹': 'Rename folder',
+  '创建': 'Create',
+  '文件夹名称': 'Folder name',
+  '一句话说明': 'One-line summary',
+  '（可选）': '(optional)',
+  '例如：工作台 · 微信提醒方向': 'e.g. Workbench · WeChat reminder directions',
+  '这个文件夹收的是哪一类点子': 'What kind of ideas does this folder hold?',
+  '文件夹 = 点子王；删除文件夹不会删除点子，它们会回到「未归类」': 'A folder is an idea cluster; deleting a folder keeps the ideas — they go back to “Unfiled”.',
 }
